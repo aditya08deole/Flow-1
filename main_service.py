@@ -163,6 +163,15 @@ class ImageCaptureService:
         # Service configuration
         self.capture_interval = config.CAPTURE_INTERVAL_MINUTES * 60  # Convert to seconds
         
+        # Tracking Fields
+        self._last_status_code = None
+        self._last_error = ""
+        self._last_filename = ""
+        self._last_aruco_seen = None
+        self._aruco_fail_streak = 0
+        self._last_roi_pts = None
+        self.ARUCO_CACHE_MINUTES = 30
+        
         logging.info(f"✓ Capture interval: {config.CAPTURE_INTERVAL_MINUTES} minutes")
         logging.info(f"✓ Camera resolution: {config.CAMERA_RESOLUTION[0]}x{config.CAMERA_RESOLUTION[1]}")
         logging.info(f"✓ JPEG quality: {config.JPEG_QUALITY}")
@@ -206,6 +215,9 @@ class ImageCaptureService:
     def _write_health(self, status: str, message: str = ""):
         """Write health watchdog file for fleet monitoring."""
         try:
+            usage = shutil.disk_usage('/')
+            free_mb = usage.free / (1024 * 1024)
+
             health = {
                 "device_id": getattr(self, 'device_id', 'unknown'),
                 "status": status,
@@ -213,7 +225,12 @@ class ImageCaptureService:
                 "message": message,
                 "uptime_cycles": getattr(self, '_cycle_count', 0),
                 "success_count": getattr(self, '_success_count', 0),
-                "backlog_size": len(self.upload_backlog) if hasattr(self, 'upload_backlog') else 0
+                "backlog_size": len(self.upload_backlog) if hasattr(self, 'upload_backlog') else 0,
+                "last_status_code": getattr(self, '_last_status_code', None),
+                "last_error": getattr(self, '_last_error', ""),
+                "last_filename": getattr(self, '_last_filename', ""),
+                "last_aruco_seen": self._last_aruco_seen.isoformat() if getattr(self, '_last_aruco_seen', None) else None,
+                "free_disk_mb": round(free_mb, 1)
             }
             with open(HEALTH_FILE, 'w') as f:
                 json.dump(health, f, indent=2)
@@ -285,6 +302,8 @@ class ImageCaptureService:
             # Pre-check: Disk space
             if not self._check_disk_space():
                 cycle_duration = time.time() - cycle_start
+                self._last_status_code = config.THINGSPEAK_STATUS_ERROR
+                self._last_error = "Disk space critically low"
                 self._send_thingspeak_status(config.THINGSPEAK_STATUS_ERROR, cycle_duration=cycle_duration)
                 return False
             
@@ -295,6 +314,8 @@ class ImageCaptureService:
             if image is None:
                 logging.error("❌ Image capture failed - skipping cycle")
                 cycle_duration = time.time() - cycle_start
+                self._last_status_code = config.THINGSPEAK_STATUS_ERROR
+                self._last_error = "Image capture failed"
                 self._send_thingspeak_status(config.THINGSPEAK_STATUS_ERROR, cycle_duration=cycle_duration)
                 return False
             
@@ -302,17 +323,40 @@ class ImageCaptureService:
             
             # Step 2: Extract ROI using ArUco markers
             logging.info("Step 2/4: Extracting ROI...")
-            roi = extract_roi(image)
+            
+            # Check if cached ROI coords are still valid
+            cached_pts = None
+            if self._last_roi_pts is not None and self._last_aruco_seen is not None:
+                delta = datetime.now() - self._last_aruco_seen
+                if delta.total_seconds() <= self.ARUCO_CACHE_MINUTES * 60:
+                    cached_pts = self._last_roi_pts
+                else:
+                    logging.info("⏱️  Cached ROI exceeded 30-minute validity; requiring fresh ArUco detection.")
+                    self._last_roi_pts = None
+            
+            roi, pts_source, is_cached = extract_roi(image, cached_pts=cached_pts)
             
             if roi is not None:
                 upload_image = roi
                 aruco_detected = True
-                roi_status = f"{roi.shape[1]}x{roi.shape[0]} px (ArUco detected)"
+                roi_status = f"{roi.shape[1]}x{roi.shape[0]} px ({'Cached ' if is_cached else 'Fresh '}ArUco ROI)"
                 logging.info(f"✓ ROI extracted: {roi_status}")
+                
+                # Update Tracking Information on Fresh Detection
+                if not is_cached:
+                    self._last_roi_pts = pts_source
+                    self._aruco_fail_streak = 0
+                    self._last_aruco_seen = datetime.now()
+                else:
+                    # Still consider a cache-hit a "success" so we don't log endless warnings
+                    self._aruco_fail_streak = 0
             else:
                 upload_image = image
                 aruco_detected = False
-                roi_status = "Using full image (ArUco not detected)"
+                self._aruco_fail_streak += 1
+                if self._aruco_fail_streak >= 6:
+                    logging.warning("⚠️  ArUco missing for 6 cycles and cache expired; check markers/lighting")
+                roi_status = "Using full image (ArUco not detected, no valid cache)"
                 logging.warning(f"⚠️  {roi_status}")
             
             # Free original image from memory early (important on Zero W)
@@ -351,6 +395,9 @@ class ImageCaptureService:
                 if aruco_detected:
                     # Status 1: ArUco ROI cropped + uploaded successfully
                     logging.info("📊 ThingSpeak: Sending status=1 (ArUco ROI success)")
+                    self._last_status_code = config.THINGSPEAK_STATUS_ARUCO_SUCCESS
+                    self._last_error = ""
+                    self._last_filename = filename
                     self._send_thingspeak_status(
                         config.THINGSPEAK_STATUS_ARUCO_SUCCESS,
                         file_size_kb=round(file_size, 1),
@@ -359,6 +406,9 @@ class ImageCaptureService:
                 else:
                     # Status 0: No ArUco, full image uploaded
                     logging.info("📊 ThingSpeak: Sending status=0 (no ArUco, full image)")
+                    self._last_status_code = config.THINGSPEAK_STATUS_NO_ARUCO
+                    self._last_error = ""
+                    self._last_filename = filename
                     self._send_thingspeak_status(
                         config.THINGSPEAK_STATUS_NO_ARUCO,
                         file_size_kb=round(file_size, 1),
@@ -376,6 +426,9 @@ class ImageCaptureService:
                 
                 # Status 2: Upload error
                 logging.info("📊 ThingSpeak: Sending status=2 (upload error)")
+                self._last_status_code = config.THINGSPEAK_STATUS_ERROR
+                self._last_error = "Google Drive upload failed"
+                self._last_filename = filename
                 self._send_thingspeak_status(
                     config.THINGSPEAK_STATUS_ERROR,
                     cycle_duration=round(cycle_duration, 1)
@@ -402,6 +455,8 @@ class ImageCaptureService:
             
             # Status 2: Error
             cycle_duration = time.time() - cycle_start
+            self._last_status_code = config.THINGSPEAK_STATUS_ERROR
+            self._last_error = str(e)
             self._send_thingspeak_status(
                 config.THINGSPEAK_STATUS_ERROR,
                 cycle_duration=round(cycle_duration, 1)

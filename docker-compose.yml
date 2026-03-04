@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  retrofit-capture:
+    build: .
+    image: retrofit-capture-service:latest
+    container_name: retrofit-capture-service
+    restart: always # Automatically restart on failure or reboot
+    privileged: true # Required for direct local hardware camera access on RPi
+    volumes:
+      - ./config_WM.py:/app/config_WM.py:ro
+      - ./credentials_store.csv:/app/credentials_store.csv:ro
+      # Optional: mount an external host directory to capture output
+      - ./capture_output:/app/capture_output
+      # Ensure rclone configs are mirrored to container home directory
+      - ~/.config/rclone:/root/.config/rclone:ro
+    environment:
+      - TZ=UTC # Update this to your local region if time logging falls back
+    devices:
+      - "/dev/gpiomem:/dev/gpiomem"
+      - "/dev/video0:/dev/video0"

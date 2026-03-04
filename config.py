@@ -23,9 +23,9 @@ CAMERA_RESOLUTION = (1280, 960)  # Width x Height in pixels
 CAMERA_ROTATION = 180  # Adjust based on physical camera orientation
 
 # Camera Timing Sequence (seconds)
-WARMUP_DELAY = 0.5        # Delay after LED ON before starting camera
-FOCUS_DELAY = 3.0         # Focus adjustment time (camera active, LED ON)
-POST_CAPTURE_DELAY = 3.0  # Keep LED ON after capture before turning OFF
+WARMUP_DELAY = 0.2        # Delay after LED ON before starting camera
+FOCUS_DELAY = 1.0         # Focus adjustment time (camera active, LED ON)
+POST_CAPTURE_DELAY = 0.5  # Keep LED ON after capture before turning OFF
 
 # Image Quality
 JPEG_QUALITY = 85  # 1-100, 85 gives ~40% smaller files vs 95, no visual diff for meter reading

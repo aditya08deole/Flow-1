@@ -1,0 +1,14 @@
+[Unit]
+Description=RetroFit Image Capture Service
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/retrofit/Ph-03-main
+ExecStart=/opt/retrofit/Ph-03-main/venv/bin/python main_service.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
