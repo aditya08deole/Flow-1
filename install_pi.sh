@@ -8,7 +8,7 @@ echo "==========================================="
 
 echo "[1/4] Updating apt and installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3-pip python3-venv libatlas-base-dev rclone
+sudo apt-get install -y python3-pip python3-venv libatlas-base-dev rclone libgl1-mesa-glx libglib2.0-0 libcamera-dev
 
 echo "[2/4] Setting up Python dependencies..."
 # Utilizing a virtual environment to avoid --break-system-packages overrides
