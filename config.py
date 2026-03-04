@@ -45,10 +45,10 @@ ARUCO_MARKER_IDS = [0, 1, 2, 3]
 # Positive values expand the box, Negative values shrink the box
 # For example, to cut off markers on the right but keep the left intact:
 ROI_PADDING = {
-    "top": 0,    # Shrink top by 5%
-    "bottom": 0, # Shrink bottom by 5%
-    "left": 6,  # Perfect balance between -10 and -18 to hide sticker but protect '4'
-    "right": 0  # Aggressively shrink to completely cut off the right marker
+    "top": 0,    # Shrink top 
+    "bottom": 0, # Shrink bottom 
+    "left": 5,  
+    "right": 5  
 }
 
 
