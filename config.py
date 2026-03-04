@@ -47,8 +47,8 @@ ARUCO_MARKER_IDS = [0, 1, 2, 3]
 ROI_PADDING = {
     "top": -5,    # Shrink top by 5%
     "bottom": -5, # Shrink bottom by 5%
-    "left": -15,  # Perfect balance between -10 and -18 to hide sticker but protect '4'
-    "right": -15  # Aggressively shrink to completely cut off the right marker
+    "left": -20,  # Perfect balance between -10 and -18 to hide sticker but protect '4'
+    "right": -20  # Aggressively shrink to completely cut off the right marker
 }
 
 
