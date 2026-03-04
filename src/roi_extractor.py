@@ -165,6 +165,23 @@ def extract_roi(image, cached_pts=None):
         matrix = cv2.getPerspectiveTransform(pts_source, pts_dst)
         roi = cv2.warpPerspective(image, matrix, (out_w, out_h))
 
+        # --- Post-Crop Exact Pixel Trimming ---
+        trim = config.POST_CROP_TRIM_PX
+        t_top, t_bot, t_left, t_right = trim.get("top", 0), trim.get("bottom", 0), trim.get("left", 0), trim.get("right", 0)
+        
+        # Verifytrim amounts won't completely collapse the image
+        if t_top + t_bot < out_h and t_left + t_right < out_w:
+            y1 = t_top
+            y2 = out_h - t_bot if t_bot > 0 else out_h
+            x1 = t_left
+            x2 = out_w - t_right if t_right > 0 else out_w
+            
+            roi = roi[y1:y2, x1:x2]
+            out_w = roi.shape[1]
+            out_h = roi.shape[0]
+        else:
+            logging.warning(f"POST_CROP_TRIM_PX ({t_top},{t_bot},{t_left},{t_right}) exceeds image dims ({out_w}x{out_h}). Skipping trim.")
+
         logging.debug(f"ROI extracted: {out_w}x{out_h} px from {'cached' if is_cached else 'fresh'} markers")
         return roi, pts_source, is_cached
 

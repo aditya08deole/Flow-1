@@ -45,10 +45,20 @@ ARUCO_MARKER_IDS = [0, 1, 2, 3]
 # Positive values expand the box, Negative values shrink the box
 # For example, to cut off markers on the right but keep the left intact:
 ROI_PADDING = {
-    "top": 0,    # Shrink top 
-    "bottom": 0, # Shrink bottom 
-    "left": 0,  
-    "right": 0  
+    "top": 0,     # Shrink top 
+    "bottom": 0,  # Shrink bottom 
+    "left": 0,    
+    "right": 0    
+}
+
+# Post-Crop Exact Pixel Trimming
+# This runs AFTER the ROI padding crop. It cuts an exact number of pixels off the final image edges.
+# Use this for fine-tuning the borders regardless of how far the markers are placed.
+POST_CROP_TRIM_PX = {
+    "top": 0,     # Pixels to cut from the top
+    "bottom": 0,  # Pixels to cut from the bottom
+    "left": 4,    # Pixels to cut from the left (e.g., to shave off a visible marker line)
+    "right": 4    # Pixels to cut from the right
 }
 
 
@@ -163,6 +173,14 @@ def validate_config():
             # Allow negative padding (up to -50% to prevent full collapse) and positive padding
             if not (-50 <= val <= 100):
                 errors.append(f"ROI_PADDING '{key}' must be between -50 and 100")
+                
+    if not isinstance(POST_CROP_TRIM_PX, dict) or not expected_keys.issubset(POST_CROP_TRIM_PX.keys()):
+        errors.append("POST_CROP_TRIM_PX must be a dictionary containing 'top', 'bottom', 'left', 'right'")
+    else:
+        for key in expected_keys:
+            val = POST_CROP_TRIM_PX[key]
+            if not isinstance(val, int) or val < 0:
+                errors.append(f"POST_CROP_TRIM_PX '{key}' must be zero or a positive integer")
     
     # Raise error if any validation failed
     if errors:
