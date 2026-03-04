@@ -1,6 +1,6 @@
+# numpy and opencv are installed via apt (python3-numpy, python3-opencv)
+# Do NOT add them here — piwheels has hash mismatch issues on armv6l
 picamera>=1.13
-numpy>=1.21.0
-opencv-contrib-python-headless>=4.5.0.0
 RPi.GPIO>=0.7.1
 requests>=2.26.0
 urllib3>=1.26.0

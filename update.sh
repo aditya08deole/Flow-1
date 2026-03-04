@@ -21,7 +21,7 @@ if [ -f "docker-compose.yml" ] && command -v docker-compose &> /dev/null; then
 else
     echo "   -> Native environment detected..."
     if [ ! -d "venv" ]; then
-        python3 -m venv venv
+        python3 -m venv --system-site-packages venv
     fi
     source venv/bin/activate
     pip install --no-cache-dir -r requirements.txt
