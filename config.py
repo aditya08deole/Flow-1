@@ -70,6 +70,28 @@ POST_CROP_TRIM_PX = {
 }
 
 
+
+# ============================================================
+# DIGIT RECOGNITION SETTINGS
+# ============================================================
+
+# Blur gate — Laplacian variance below this threshold means the ROI is too blurry
+# for reliable digit inference. Typical sharp images score > 200; blurry < 80.
+BLUR_THRESHOLD = 100.0
+
+# HOG feature extraction — must match what rf_rasp_classifier.sav was trained on
+DIGIT_RESIZE_H = 90           # Resize height per digit crop (pixels)
+DIGIT_RESIZE_W = 45           # Resize width per digit crop (pixels)
+MIN_CONTOUR_AREA = 1500       # Minimum contour pixel area to be classified as a digit
+
+# Random Forest model (loaded once at service start, not per-cycle)
+MODEL_PATH = "rf_rasp_classifier.sav"
+
+# Meter reading interpretation
+DECIMAL_DIGITS = 1            # Rightmost N digits are decimal places (e.g. 01234 → 123.4)
+STORED_READINGS_MAX = 5       # Rolling window size for flow rate calculation
+
+
 # ============================================================
 # UPLOAD SETTINGS
 # ============================================================

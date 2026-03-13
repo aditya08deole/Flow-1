@@ -6,6 +6,10 @@ Status Codes (sent to field1):
   0 = Upload successful but ArUco NOT detected, full image sent
   2 = Error - no image captured, capture failure, or upload error
 
+Edge Processing Fields:
+  field4 = Detected water meter value (float, e.g. 1234.5)
+  field5 = Flow rate (float, units/min)
+
 Uses ThingSpeak Update API: https://api.thingspeak.com/update
 """
 
@@ -51,15 +55,18 @@ class ThingSpeakReporter:
         
         logger.info(f"✓ ThingSpeak: Channel {self.channel_id} configured")
     
-    def send_status(self, status_code, field2_value=None, field3_value=None) -> bool:
+    def send_status(self, status_code, field2_value=None, field3_value=None,
+                    meter_value=None, flow_rate=None) -> bool:
         """
         Send status code to ThingSpeak field1.
-        
+
         Args:
             status_code: Status code to send (0, 1, or 2)
             field2_value: Optional value for field2 (e.g., file size in KB)
             field3_value: Optional value for field3 (e.g., cycle duration in seconds)
-            
+            meter_value: Optional float — detected water meter reading (field4)
+            flow_rate: Optional float — flow rate in units/min (field5)
+
         Returns:
             True if update was accepted by ThingSpeak, False otherwise
         """
@@ -83,6 +90,10 @@ class ThingSpeakReporter:
             payload['field2'] = field2_value
         if field3_value is not None:
             payload['field3'] = field3_value
+        if meter_value is not None:
+            payload['field4'] = round(float(meter_value), 1)
+        if flow_rate is not None:
+            payload['field5'] = round(float(flow_rate), 3)
         
         # Send with retry
         for attempt in range(self.MAX_RETRIES):
@@ -99,8 +110,13 @@ class ThingSpeakReporter:
                 if response.status_code == 200:
                     entry_id = response.text.strip()
                     if entry_id != "0":
+                        extra = ""
+                        if meter_value is not None:
+                            extra += f", meter={meter_value:.1f}"
+                        if flow_rate is not None:
+                            extra += f", flow={flow_rate:.3f}"
                         logger.info(
-                            f"✓ ThingSpeak: status={status_code} sent "
+                            f"ThingSpeak: status={status_code}{extra} sent "
                             f"(entry #{entry_id}, channel {self.channel_id})"
                         )
                         return True

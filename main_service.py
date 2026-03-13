@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
-RetroFit Image Capture Service v2.1
-Cloud Processing Architecture - Capture, Upload to GDrive, Report to ThingSpeak
-
+RetroFit Image Capture Service v2.1 — Full Edge Processing System
 Pipeline per cycle:
   1. Capture image (PiCamera + GPIO LED)
   2. Extract ROI via ArUco markers
-  3. Save image locally
-  4. Upload to Google Drive (rclone)
-  5. Report status to ThingSpeak:
-       field1=1  →  ArUco ROI extracted, upload success
-       field1=0  →  No ArUco detected, full image uploaded
-       field1=2  →  Error (capture fail, upload fail, any error)
+  3. Save + upload to Google Drive (rclone)
+  4. Edge processing: blur check → contour → HOG → RF digit classify
+  5. Report to ThingSpeak:
+       field1 = ArUco status (1=ROI/0=full/2=error)
+       field2 = file size KB
+       field3 = cycle duration s
+       field4 = detected meter reading (float, e.g. 1234.5)
+       field5 = flow rate (units/min)
 
 Repository: https://github.com/aditya08deole/Flow-1.git
-Deployment: See DEPLOYMENT.md for setup instructions
 """
 
 import os
@@ -39,6 +38,8 @@ from roi_extractor import extract_roi
 from rclone_uploader import RcloneUploader
 from thingspeak_reporter import ThingSpeakReporter
 from credential_manager import load_from_config_wm, CredentialError
+from digit_recognizer import (load_model, detect_blur, recognize_digits,
+                               apply_hamming_correction, calculate_flow_rate)
 import config
 
 from logging.handlers import RotatingFileHandler
@@ -162,6 +163,22 @@ class ImageCaptureService:
         self.output_dir = Path("capture_output")
         self.output_dir.mkdir(exist_ok=True)
         logging.info(f"✓ Output directory: {self.output_dir.absolute()}")
+
+        # Load Random Forest digit recognition model (once — 32MB, stays in RAM)
+        try:
+            self._rf_model = load_model(config.MODEL_PATH)
+            logging.info(f"✓ RF model loaded: {config.MODEL_PATH}")
+        except Exception as e:
+            logging.critical(f"❌ Failed to load RF model '{config.MODEL_PATH}': {e}")
+            logging.critical("Ensure rf_rasp_classifier.sav is present in the working directory")
+            sys.exit(3)  # Fatal config error — systemd will NOT restart
+
+        # Rolling window for meter readings and flow rate calculation
+        self._stored_values = deque([None] * config.STORED_READINGS_MAX,
+                                    maxlen=config.STORED_READINGS_MAX)
+        self._stored_timestamps = deque([None] * config.STORED_READINGS_MAX,
+                                        maxlen=config.STORED_READINGS_MAX)
+        self._first_reading = True  # Skip Hamming correction and flow rate on first cycle
 
         # Upload backlog queue (for retrying failed GDrive uploads)
         self.upload_backlog = deque(maxlen=MAX_BACKLOG_SIZE)
@@ -301,16 +318,20 @@ class ImageCaptureService:
         except Exception:
             pass  # Health file is best-effort
 
-    def _send_thingspeak_status(self, status_code, file_size_kb=None, cycle_duration=None):
-        """Send status code to ThingSpeak (if configured)."""
+    def _send_thingspeak_status(self, status_code, file_size_kb=None, cycle_duration=None,
+                                 meter_value=None, flow_rate=None):
+        """Send status + edge processing results to ThingSpeak (if configured)."""
         if self.thingspeak is None:
             logging.debug("ThingSpeak not configured — skipping status report")
             return
 
         try:
-            self.thingspeak.send_status(status_code, file_size_kb, cycle_duration)
+            self.thingspeak.send_status(
+                status_code, file_size_kb, cycle_duration,
+                meter_value=meter_value, flow_rate=flow_rate
+            )
         except Exception as e:
-            logging.error(f"⚠️  ThingSpeak status report failed: {e}")
+            logging.error(f"ThingSpeak status report failed: {e}")
 
     def _retry_backlog(self):
         """Retry uploading files from the backlog queue."""
@@ -442,7 +463,54 @@ class ImageCaptureService:
                 [cv2.IMWRITE_JPEG_QUALITY, config.JPEG_QUALITY]
             )
 
-            # Free upload image from memory (keep only file on disk)
+            # Step 3.5: Edge Processing — blur check → contour → HOG → RF classify
+            # Runs on the ROI while still in memory (before del). Skipped on full-image fallback.
+            meter_value, flow_rate = None, None
+
+            if aruco_detected:
+                is_blurry, blur_var = detect_blur(upload_image, config.BLUR_THRESHOLD)
+                if is_blurry:
+                    logging.warning(
+                        f"[Step 3.5] ROI too blurry (Laplacian={blur_var:.1f} < {config.BLUR_THRESHOLD}) "
+                        f"— skipping digit inference"
+                    )
+                else:
+                    logging.info(f"[Step 3.5] Blur OK (Laplacian={blur_var:.1f}) — running digit recognition")
+                    raw_str = recognize_digits(upload_image, self._rf_model)
+
+                    if raw_str:
+                        now = datetime.now()
+                        prev_int = (
+                            int(self._stored_values[-1] * 10)
+                            if not self._first_reading and self._stored_values[-1] is not None
+                            else None
+                        )
+                        t_diff = (
+                            (now - self._stored_timestamps[-1]).total_seconds() / 60.0
+                            if not self._first_reading and self._stored_timestamps[-1] is not None
+                            else 1.0
+                        )
+                        corrected_int = apply_hamming_correction(raw_str, prev_int, t_diff)
+                        meter_value = corrected_int / (10 ** config.DECIMAL_DIGITS)
+
+                        if not self._first_reading and self._stored_values[-1] is not None:
+                            flow_rate = calculate_flow_rate(
+                                meter_value, self._stored_values[-1], t_diff)
+
+                        self._stored_values.append(meter_value)
+                        self._stored_timestamps.append(now)
+                        self._first_reading = False
+
+                        logging.info(
+                            f"[Step 3.5] Meter={meter_value:.1f}  "
+                            f"Flow={flow_rate if flow_rate is not None else 'n/a'} units/min"
+                        )
+                    else:
+                        logging.warning("[Step 3.5] No digits detected in ROI — Field4/5 not sent")
+            else:
+                logging.info("[Step 3.5] No ROI available — skipping digit inference")
+
+            # Free ROI/image from memory (digit inference done, file already on disk)
             del upload_image
 
             file_size = filepath.stat().st_size / 1024  # KB
@@ -463,18 +531,20 @@ class ImageCaptureService:
                 # Send ThingSpeak status based on ArUco detection
                 if aruco_detected:
                     # Status 1: ArUco ROI cropped + uploaded successfully
-                    logging.info("📊 ThingSpeak: Sending status=1 (ArUco ROI success)")
+                    logging.info("ThingSpeak: Sending status=1 (ArUco ROI success)")
                     self._last_status_code = config.THINGSPEAK_STATUS_ARUCO_SUCCESS
                     self._last_error = ""
                     self._last_filename = filename
                     self._send_thingspeak_status(
                         config.THINGSPEAK_STATUS_ARUCO_SUCCESS,
                         file_size_kb=round(file_size, 1),
-                        cycle_duration=round(cycle_duration, 1)
+                        cycle_duration=round(cycle_duration, 1),
+                        meter_value=meter_value,
+                        flow_rate=flow_rate
                     )
                 else:
                     # Status 0: No ArUco, full image uploaded
-                    logging.info("📊 ThingSpeak: Sending status=0 (no ArUco, full image)")
+                    logging.info("ThingSpeak: Sending status=0 (no ArUco, full image)")
                     self._last_status_code = config.THINGSPEAK_STATUS_NO_ARUCO
                     self._last_error = ""
                     self._last_filename = filename
