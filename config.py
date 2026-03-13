@@ -1,6 +1,7 @@
 """
 RetroFit Image Capture Service v2.1 - Configuration
 Cloud Processing Architecture (No Edge ML)
+Repository: https://github.com/aditya08deole/Flow-1.git
 
 Device-specific credentials loaded from credentials_store.csv
 Device identity from config_WM.py (device-specific, not in git)

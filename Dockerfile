@@ -1,5 +1,7 @@
 FROM python:3.11-slim-bookworm
 
+# RetroFit Image Capture Service - Docker Image
+# Repository: https://github.com/aditya08deole/Flow-1.git
 # System dependencies for OpenCV, rclone, and camera support
 RUN apt-get update && apt-get install -y \
     rclone \

@@ -1,5 +1,7 @@
 #!/bin/bash
 # RetroFit Image Capture Service - Simple OTA updater
+# Repository: https://github.com/aditya08deole/Flow-1.git
+# Pulls latest changes and updates dependencies automatically every 30 minutes
 
 # Always restart the service on script exit (success or failure), native mode only
 _ensure_service_running() {

@@ -1,5 +1,7 @@
 [Unit]
 Description=RetroFit Image Capture Service v2.1
+# Repository: https://github.com/aditya08deole/Flow-1.git
+# Documentation: See DEPLOYMENT.md
 After=network-online.target
 Wants=network-online.target
 

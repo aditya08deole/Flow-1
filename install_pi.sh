@@ -1,5 +1,7 @@
 #!/bin/bash
 # RetroFit Image Capture Service - Pi Zero W Installer
+# Repository: https://github.com/aditya08deole/Flow-1.git
+# Documentation: See DEPLOYMENT.md for complete setup guide
 
 echo "==========================================="
 echo "RetroFit Capture Service - Pi OS Installer"
