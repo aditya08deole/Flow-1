@@ -35,10 +35,10 @@ JPEG_QUALITY = 85  # 1-100, 85 gives ~40% smaller files vs 95, no visual diff fo
 CAMERA_SHARPNESS = 8.0    # picamera2: 1.0=default, 8.0=sharp, 16.0=max — legacy picamera: mapped to 0-100
 
 # AE/AWB Convergence Wait (picamera2 only)
-AE_LOCK_TIMEOUT = 5.0        # Max seconds to wait for AE/AWB to converge before falling back to fixed sleep
+AE_LOCK_TIMEOUT = 0.5        # Fast-fail: IMX219/libcamera v0.5.x rarely sets AeLocked in preview mode
 AE_LOCK_POLL_INTERVAL = 0.1  # How often to poll AE lock metadata (seconds)
-AE_WARMUP_FRAMES = 7         # Frames to discard for AE warmup when metadata polling fails.
-                              # Each capture_array() forces a full ISP AE/AWB cycle. 7 frames ≈ 3-4s.
+AE_PREVIEW_DURATION = 3.0    # Seconds to stream in preview mode for AE/AWB to converge (fallback).
+                              # ISP streams at ~30fps during this wait — convergence is reliable.
 
 
 # ============================================================

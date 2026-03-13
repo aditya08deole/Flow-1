@@ -21,6 +21,19 @@ git checkout -- .
 echo "[3/4] Pulling latest changes from GitHub..."
 git pull
 
+echo "[3.5/4] Checking if service file changed..."
+if git diff HEAD~1 HEAD --name-only 2>/dev/null | grep -q "retrofit-capture.service"; then
+    echo "   -> Service file changed in this update — reinstalling..."
+    CURRENT_DIR=$(pwd)
+    CURRENT_USER=$(whoami)
+    cp retrofit-capture.service /tmp/retrofit-capture.service
+    sed -i "s|__INSTALL_DIR__|$CURRENT_DIR|g" /tmp/retrofit-capture.service
+    sed -i "s|__SERVICE_USER__|$CURRENT_USER|g" /tmp/retrofit-capture.service
+    sudo cp /tmp/retrofit-capture.service /etc/systemd/system/retrofit-capture.service
+    sudo systemctl daemon-reload
+    echo "   -> Service file reinstalled."
+fi
+
 echo "[4/4] Synchronizing environment..."
 # Check if resolving via Docker native configs
 if [ -f "docker-compose.yml" ] && command -v docker-compose &> /dev/null; then

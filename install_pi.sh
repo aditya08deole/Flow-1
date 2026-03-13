@@ -46,9 +46,8 @@ echo "[3/4] Google Drive (rclone) setup..."
 echo "You must configure rclone to connect to Google Drive."
 echo "Run: 'rclone config' and create a remote named 'gdrive'."
 
-echo "[4/4] Final Setup..."
+echo "[4/4] Installing systemd service..."
 echo "Please ensure you have placed 'credentials_store.csv' and 'config_WM.py' in this directory."
-echo "Then, you can install the systemd service by running:"
 
 # Create a modified copy of the service file (do NOT modify the git-tracked original)
 CURRENT_DIR=$(pwd)
@@ -56,16 +55,15 @@ CURRENT_USER=$(whoami)
 cp retrofit-capture.service /tmp/retrofit-capture.service
 sed -i "s|__INSTALL_DIR__|$CURRENT_DIR|g" /tmp/retrofit-capture.service
 sed -i "s|__SERVICE_USER__|$CURRENT_USER|g" /tmp/retrofit-capture.service
-
-echo ""
-echo "To install and start the service, run these commands:"
-echo "sudo cp /tmp/retrofit-capture.service /etc/systemd/system/"
-echo "sudo systemctl daemon-reload"
-echo "sudo systemctl enable retrofit-capture.service"
-echo "sudo systemctl start retrofit-capture.service"
+sudo cp /tmp/retrofit-capture.service /etc/systemd/system/retrofit-capture.service
+sudo systemctl daemon-reload
+sudo systemctl enable retrofit-capture.service
+sudo systemctl restart retrofit-capture.service
+echo "  -> Service installed, enabled and started."
+echo "  -> Check status: systemctl status retrofit-capture.service"
 
 echo ""
 echo "[Optional] To enable automatic OTA updates every 30 minutes, run:"
 echo "(crontab -l 2>/dev/null; echo \"*/30 * * * * cd $CURRENT_DIR && ./update.sh >> update.log 2>&1\") | crontab -"
 
-echo "Installation script completed!"
+echo "Installation complete!"
