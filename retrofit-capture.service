@@ -1,7 +1,6 @@
 [Unit]
 Description=RetroFit Image Capture Service v2.1
 # Repository: https://github.com/aditya08deole/Flow-1.git
-# Documentation: See DEPLOYMENT.md
 After=network-online.target
 Wants=network-online.target
 StartLimitBurst=3
@@ -9,20 +8,20 @@ StartLimitIntervalSec=300
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/opt/retrofit/Ph-03-main
+User=__SERVICE_USER__
+WorkingDirectory=__INSTALL_DIR__
 
 # Python environment
 Environment="PYTHONDONTWRITEBYTECODE=1"
 Environment="PYTHONUNBUFFERED=1"
-Environment="VIRTUAL_ENV=/opt/retrofit/Ph-03-main/.venv"
-Environment="PATH=/opt/retrofit/Ph-03-main/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="VIRTUAL_ENV=__INSTALL_DIR__/.venv"
+Environment="PATH=__INSTALL_DIR__/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Pre-start: wait for network stack to fully settle
 ExecStartPre=/bin/sleep 10
 
 # Start using .venv Python
-ExecStart=/opt/retrofit/Ph-03-main/.venv/bin/python3 /opt/retrofit/Ph-03-main/main_service.py
+ExecStart=__INSTALL_DIR__/.venv/bin/python3 __INSTALL_DIR__/main_service.py
 
 # Restart policy: only restart on non-fatal failures, stop after 3 rapid crashes
 Restart=on-failure

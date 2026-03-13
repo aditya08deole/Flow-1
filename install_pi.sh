@@ -54,8 +54,8 @@ echo "Then, you can install the systemd service by running:"
 CURRENT_DIR=$(pwd)
 CURRENT_USER=$(whoami)
 cp retrofit-capture.service /tmp/retrofit-capture.service
-sed -i "s|/opt/retrofit/Ph-03-main|$CURRENT_DIR|g" /tmp/retrofit-capture.service
-sed -i "s|User=pi|User=$CURRENT_USER|g" /tmp/retrofit-capture.service
+sed -i "s|__INSTALL_DIR__|$CURRENT_DIR|g" /tmp/retrofit-capture.service
+sed -i "s|__SERVICE_USER__|$CURRENT_USER|g" /tmp/retrofit-capture.service
 
 echo ""
 echo "To install and start the service, run these commands:"
