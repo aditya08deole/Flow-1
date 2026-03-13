@@ -9,7 +9,11 @@ echo "==========================================="
 
 echo "[1/4] Updating apt and installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3-pip python3-venv python3-numpy python3-opencv libatlas-base-dev rclone libglib2.0-0
+# python3-skimage, python3-sklearn, python3-joblib installed via apt to avoid
+# armhf source compilation failures (no piwheels wheels for recent versions)
+sudo apt-get install -y python3-pip python3-venv python3-numpy python3-opencv \
+    libatlas-base-dev rclone libglib2.0-0 \
+    python3-skimage python3-sklearn python3-joblib
 
 echo "[1.5/4] Disabling WiFi power saving (prevents disconnects during uploads)..."
 sudo iwconfig wlan0 power off || true

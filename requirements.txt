@@ -1,5 +1,7 @@
-# numpy and opencv are installed via apt (python3-numpy, python3-opencv)
-# Do NOT add them here — piwheels has hash mismatch issues on armv6l
+# These packages are installed via apt-get in install_pi.sh (precompiled for armhf Bookworm).
+# Do NOT add them here — armhf has no piwheels wheels for recent scikit-image/learn versions
+# and source compilation fails because meson cannot find numpy headers in the venv context.
+#   apt packages: python3-numpy, python3-opencv, python3-skimage, python3-sklearn, python3-joblib
 picamera>=1.13
 RPi.GPIO>=0.7.1
 requests>=2.26.0
@@ -7,9 +9,6 @@ urllib3>=1.26.0
 python-dateutil>=2.8.0
 pytz>=2021.1
 
-# Edge processing dependencies (HOG + Random Forest digit recognition)
-scikit-image>=0.19.0
-scikit-learn>=1.0.0
-joblib>=1.1.0
+# Edge processing helpers — pure Python or have piwheels wheels, safe to pip install
 imutils>=0.5.4
 psutil>=5.8.0
