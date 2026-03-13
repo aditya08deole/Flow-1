@@ -24,12 +24,19 @@ CAMERA_RESOLUTION = (1280, 960)  # Width x Height in pixels
 CAMERA_ROTATION = 180  # Adjust based on physical camera orientation
 
 # Camera Timing Sequence (seconds)
-WARMUP_DELAY = 0.2        # Delay after LED ON before starting camera
-FOCUS_DELAY = 1.0         # Focus adjustment time (camera active, LED ON)
+WARMUP_DELAY = 0.5        # Delay after LED ON before starting camera (0.2 was too short for LED to stabilise)
+FOCUS_DELAY = 3.5         # Focus adjustment time — legacy picamera AE/AWB needs 3-5s in indoor lighting
 POST_CAPTURE_DELAY = 0.5  # Keep LED ON after capture before turning OFF
 
 # Image Quality
 JPEG_QUALITY = 85  # 1-100, 85 gives ~40% smaller files vs 95, no visual diff for meter reading
+
+# Camera Sharpness
+CAMERA_SHARPNESS = 8.0    # picamera2: 1.0=default, 8.0=sharp, 16.0=max — legacy picamera: mapped to 0-100
+
+# AE/AWB Convergence Wait (picamera2 only)
+AE_LOCK_TIMEOUT = 5.0        # Max seconds to wait for AE/AWB to converge before falling back to fixed sleep
+AE_LOCK_POLL_INTERVAL = 0.1  # How often to poll AE lock metadata (seconds)
 
 
 # ============================================================

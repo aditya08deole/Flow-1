@@ -22,6 +22,22 @@ if _aruco is None:
     logging.critical("ArUco module not found. OpenCV-contrib is not installed correctly.")
 
 
+def _preprocess_for_aruco(gray):
+    """
+    Apply CLAHE + unsharp mask to a grayscale image to enhance ArUco marker edges on blurry images.
+    Returns the enhanced grayscale image. Used only for detection — the ROI crop uses the original image.
+    """
+    # CLAHE enhances local contrast so marker borders become detectable even when image is dim
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+
+    # Unsharp mask: emphasise edges by subtracting a blurred version
+    blurred = cv2.GaussianBlur(enhanced, (0, 0), sigmaX=2.0)
+    sharpened = cv2.addWeighted(enhanced, 1.6, blurred, -0.6, 0)
+
+    return sharpened
+
+
 def extract_roi(image, cached_pts=None):
     """
     Extract ROI from image using ArUco markers or cached coordinates.
@@ -56,52 +72,59 @@ def extract_roi(image, cached_pts=None):
     try:
         # Convert to grayscale for marker detection
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        gray_enhanced = _preprocess_for_aruco(gray)
 
-        # Attempt up to 3 detection profiles
+        # 5 detection profiles: first 2 run on CLAHE-enhanced image, last 3 on raw grayscale
+        # This catches markers on blurry images where raw thresholding fails
         corners, ids = None, None
-        
-        for attempt in range(1, 4):
-            parameters = _aruco.DetectorParameters_create()
-            
-            # Profile 1: Default
-            if attempt == 2:
-                # Profile 2: Relaxed adaptive thresholding
-                parameters.adaptiveThreshWinSizeMin = 3
-                parameters.adaptiveThreshWinSizeMax = 23
-                parameters.adaptiveThreshWinSizeStep = 10
-                parameters.minMarkerPerimeterRate = 0.03
-            elif attempt == 3:
-                # Profile 3: Further relaxed thresholds
-                parameters.adaptiveThreshConstant = 7
-                parameters.polygonalApproxAccuracyRate = 0.05
-                parameters.adaptiveThreshWinSizeMin = 3
-                parameters.adaptiveThreshWinSizeMax = 23
-                parameters.adaptiveThreshWinSizeStep = 10
-                parameters.minMarkerPerimeterRate = 0.03
+        aruco_dict = _aruco.Dictionary_get(_aruco.DICT_4X4_50)
 
-            aruco_dict = _aruco.Dictionary_get(_aruco.DICT_4X4_50)
-            c, i, _ = _aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
-            
-            # Check if we found all 4 required markers
+        detection_images = [gray_enhanced, gray_enhanced, gray, gray, gray]
+        profiles = [
+            # (adaptThreshMin, adaptThreshMax, adaptStep, minPerim, adaptConst, polyApprox)
+            (3, 23, 10, 0.03, 7,   0.05),   # Profile 1: enhanced + relaxed
+            (3, 53, 10, 0.02, 7,   0.05),   # Profile 2: enhanced + very relaxed window
+            (3, 23, 10, 0.03, 7,   0.05),   # Profile 3: raw + relaxed
+            (5, 53,  4, 0.02, 10,  0.08),   # Profile 4: raw + large adaptive windows
+            (3, 23, 10, 0.01, 5,   0.10),   # Profile 5: raw + minimal size filter
+        ]
+
+        for idx, (det_image, prof) in enumerate(zip(detection_images, profiles), start=1):
+            parameters = _aruco.DetectorParameters_create()
+            parameters.adaptiveThreshWinSizeMin    = prof[0]
+            parameters.adaptiveThreshWinSizeMax    = prof[1]
+            parameters.adaptiveThreshWinSizeStep   = prof[2]
+            parameters.minMarkerPerimeterRate      = prof[3]
+            parameters.adaptiveThreshConstant      = prof[4]
+            parameters.polygonalApproxAccuracyRate = prof[5]
+            try:
+                parameters.cornerRefinementMethod = _aruco.CORNER_REFINE_SUBPIX
+            except AttributeError:
+                pass  # Not available on all OpenCV builds
+
+            c, i, _ = _aruco.detectMarkers(det_image, aruco_dict, parameters=parameters)
+
             if i is not None and len(i) >= 4:
                 found_ids = set(i.flatten())
                 if all(req_id in found_ids for req_id in [0, 1, 2, 3]):
-                    logging.info(f"   -> [Step 2.2] ArUco detection SUCCESS (Profile {attempt})")
+                    src = 'enhanced' if idx <= 2 else 'raw'
+                    logging.info(f"   -> [Step 2.2] ArUco SUCCESS (Profile {idx}, {src})")
                     corners, ids = c, i
                     break
                 else:
-                    logging.info(f"   -> [Step 2.1] ArUco Profile {attempt}: found markers but missing required IDs")
+                    logging.info(f"   -> [Step 2.1] Profile {idx}: found {len(i)} markers, missing required IDs")
             else:
                 detected = len(i) if i is not None else 0
-                logging.info(f"   -> [Step 2.1] ArUco Profile {attempt}: found {detected}/4 markers")
-                    
-        # Free grayscale immediately
-        del gray
+                logging.info(f"   -> [Step 2.1] Profile {idx}: found {detected}/4 markers")
 
-        # If after 3 attempts, we still don't have enough markers, check cache
+        # Free grayscale copies immediately
+        del gray
+        del gray_enhanced
+
+        # If after 5 attempts, we still don't have enough markers, check cache
         if ids is None or len(ids) < 4:
             detected = 0 if ids is None else len(ids)
-            logging.warning(f"ArUco detection: found {detected}/4 markers after 3 attempts")
+            logging.warning(f"ArUco detection: found {detected}/4 markers after 5 profiles")
             
             if cached_pts is not None:
                 logging.info("Falling back to cached ROI coordinates.")
@@ -110,18 +133,28 @@ def extract_roi(image, cached_pts=None):
             else:
                 return None, None, False
         else:
-            # Build marker center map
+            # Use the inner corner of each marker (the corner pointing INTO the meter area)
+            # This gives a tighter, more stable crop than averaging all 4 corners to a center point.
+            #   ID 1 (TL) → bottom-right corner (index 2) — faces meter
+            #   ID 3 (TR) → bottom-left corner  (index 3) — faces meter
+            #   ID 0 (BR) → top-left corner     (index 0) — faces meter
+            #   ID 2 (BL) → top-right corner    (index 1) — faces meter
+            INNER_CORNER_IDX = {1: 2, 3: 3, 0: 0, 2: 1}
+
             found = {}
-            for corner, mid in zip(corners, ids.flatten()):
-                c = corner[0]
-                found[mid] = [int(c[:, 0].mean()), int(c[:, 1].mean())]
+            for corner_arr, mid in zip(corners, ids.flatten()):
+                mid = int(mid)
+                if mid in INNER_CORNER_IDX:
+                    cidx = INNER_CORNER_IDX[mid]
+                    pt = corner_arr[0][cidx]  # corner_arr shape: (1, 4, 2)
+                    found[mid] = [float(pt[0]), float(pt[1])]
 
             # Verify all 4 required markers exist
             required = [0, 1, 2, 3]
             if not all(m in found for m in required):
                 missing = [m for m in required if m not in found]
                 logging.warning(f"Missing ArUco markers: {missing}")
-                
+
                 if cached_pts is not None:
                     logging.info("Falling back to cached ROI coordinates.")
                     pts_source = cached_pts
@@ -129,12 +162,12 @@ def extract_roi(image, cached_pts=None):
                 else:
                     return None, None, False
             else:
-                # Map: TL=1, TR=3, BR=0, BL=2
+                # Map: TL=1, TR=3, BR=0, BL=2 (inner corners)
                 pts_source = np.float32([
-                    found[1],  # Top-left
-                    found[3],  # Top-right
-                    found[0],  # Bottom-right
-                    found[2],  # Bottom-left
+                    found[1],  # Top-left inner corner
+                    found[3],  # Top-right inner corner
+                    found[0],  # Bottom-right inner corner
+                    found[2],  # Bottom-left inner corner
                 ])
                 is_cached = False
 

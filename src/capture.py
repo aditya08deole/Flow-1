@@ -24,6 +24,9 @@ try:
     _POST_CAPTURE_DELAY = _cfg.POST_CAPTURE_DELAY
     _JPEG_QUALITY = _cfg.JPEG_QUALITY
     _LED_PIN = _cfg.LED_PIN
+    _SHARPNESS = _cfg.CAMERA_SHARPNESS
+    _AE_LOCK_TIMEOUT = _cfg.AE_LOCK_TIMEOUT
+    _AE_LOCK_POLL_INTERVAL = _cfg.AE_LOCK_POLL_INTERVAL
 except Exception:
     _RESOLUTION = (1280, 960)
     _ROTATION = 180
@@ -32,6 +35,9 @@ except Exception:
     _POST_CAPTURE_DELAY = 3.0
     _JPEG_QUALITY = 85
     _LED_PIN = 23
+    _SHARPNESS = 8.0
+    _AE_LOCK_TIMEOUT = 5.0
+    _AE_LOCK_POLL_INTERVAL = 0.1
 
 # Auto-detect camera library
 USE_PICAMERA2 = False
@@ -108,7 +114,39 @@ def _capture_with_picamera2():
         picam2.configure(capture_config)
 
         picam2.start()
-        time.sleep(2)  # Auto-exposure warmup
+
+        # Set sharpness before capture (default 1.0 is too soft; 8.0 produces sharp output)
+        try:
+            picam2.set_controls({"Sharpness": _SHARPNESS})
+        except Exception:
+            pass  # Older picamera2 versions may not support this control
+
+        # Wait for AE/AWB to converge before capturing (prevents blurry/dark frames)
+        deadline = time.time() + _AE_LOCK_TIMEOUT
+        ae_locked = False
+        while time.time() < deadline:
+            try:
+                metadata = picam2.capture_metadata()
+                if metadata.get('AeLocked', False) or metadata.get('AwbConverged', False):
+                    ae_locked = True
+                    break
+            except Exception:
+                pass
+            time.sleep(_AE_LOCK_POLL_INTERVAL)
+
+        if not ae_locked:
+            time.sleep(2.0)  # Fallback: fixed sleep if metadata polling not supported
+            logging.warning("AE lock not confirmed — proceeding after fallback delay")
+        else:
+            elapsed = _AE_LOCK_TIMEOUT - max(0.0, deadline - time.time())
+            logging.info(f"   -> AE/AWB converged after {elapsed:.1f}s")
+
+        # Lock exposure before capture for consistent result
+        try:
+            picam2.set_controls({"AeEnable": False, "AwbEnable": False})
+            time.sleep(0.1)  # Brief settle after locking
+        except Exception:
+            pass  # Some camera modules don't support lock controls — continue anyway
 
         image_rgb = picam2.capture_array()
         picam2.stop()
@@ -130,6 +168,10 @@ def _capture_with_picamera():
     try:
         camera.resolution = _RESOLUTION
         camera.rotation = _ROTATION
+        camera.sharpness = int(_SHARPNESS * 6.25)  # Map 0–16 range → 0–100 for legacy picamera
+        camera.awb_mode = 'auto'
+        camera.exposure_mode = 'auto'
+        camera.iso = 0  # Auto ISO
 
         # Wait for auto-exposure/white balance
         time.sleep(_FOCUS_DELAY)
