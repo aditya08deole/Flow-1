@@ -30,9 +30,10 @@ class RcloneUploader:
     MAX_RETRIES = 3
     RETRY_DELAYS = [2, 5, 10]  # seconds
 
-    def __init__(self, remote_name='gdrive', timeout=120):
+    def __init__(self, remote_name='gdrive', timeout=120, bwlimit='1M'):
         self.remote_name = remote_name
         self.timeout = timeout
+        self.bwlimit = bwlimit
         self.is_configured = self._validate_setup()
 
     def _validate_setup(self):
@@ -148,6 +149,7 @@ class RcloneUploader:
             '--no-traverse',
             '--stats', '0',
             '--quiet',
+            '--bwlimit', self.bwlimit,
         ]
 
         start = datetime.now()

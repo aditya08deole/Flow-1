@@ -1,6 +1,5 @@
 #!/bin/bash
 # RetroFit Image Capture Service - Pi Zero W Installer
-set -e
 
 echo "==========================================="
 echo "RetroFit Capture Service - Pi OS Installer"
@@ -10,14 +9,32 @@ echo "[1/4] Updating apt and installing system dependencies..."
 sudo apt-get update
 sudo apt-get install -y python3-pip python3-venv python3-numpy python3-opencv libatlas-base-dev rclone libglib2.0-0
 
+echo "[1.5/4] Disabling WiFi power saving (prevents disconnects during uploads)..."
+sudo iwconfig wlan0 power off || true
+sudo iw dev wlan0 set power_save off || true
+sudo mkdir -p /etc/NetworkManager/conf.d
+printf '[connection]\nwifi.powersave = 2\n' | sudo tee /etc/NetworkManager/conf.d/wifi-powersave.conf > /dev/null
+echo "  -> WiFi power save disabled (immediate + persistent on reboot)"
+
 echo "[2/4] Setting up Python dependencies..."
 # Utilizing a virtual environment to avoid --break-system-packages overrides
-if [ ! -d "venv" ]; then
-    python3 -m venv --system-site-packages venv
+if [ ! -d ".venv" ]; then
+    python3 -m venv --system-site-packages .venv
 fi
-source venv/bin/activate
+source .venv/bin/activate
 pip install --no-cache-dir -r requirements.txt
 deactivate
+
+echo "[2.5/4] Cleaning up legacy service files..."
+if sudo systemctl is-enabled codetest.service > /dev/null 2>&1 || \
+   sudo systemctl is-active codetest.service > /dev/null 2>&1; then
+    echo "  -> Disabling legacy codetest.service..."
+    sudo systemctl stop codetest.service || true
+    sudo systemctl disable codetest.service || true
+    sudo rm -f /etc/systemd/system/codetest.service
+    sudo systemctl daemon-reload
+    echo "  -> Legacy service removed."
+fi
 
 echo "[3/4] Google Drive (rclone) setup..."
 echo "You must configure rclone to connect to Google Drive."

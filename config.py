@@ -73,6 +73,7 @@ UPLOAD_TIMEOUT = 120  # Maximum time for single upload attempt (seconds)
 
 # rclone Configuration
 RCLONE_REMOTE_NAME = "gdrive"  # Must match 'rclone config' remote name
+RCLONE_BANDWIDTH_LIMIT = "1M"  # Upload bandwidth cap — prevents WiFi saturation on Pi Zero W
 
 
 # ============================================================

@@ -16,6 +16,7 @@ WORKDIR /app
 # Copy requirement list and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir opencv-python-headless
 
 # Copy source code and scripts into the container
 COPY . .

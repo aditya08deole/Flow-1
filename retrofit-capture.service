@@ -1,14 +1,35 @@
 [Unit]
-Description=RetroFit Image Capture Service
-After=network.target
+Description=RetroFit Image Capture Service v2.1
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=pi
 WorkingDirectory=/opt/retrofit/Ph-03-main
-ExecStart=/opt/retrofit/Ph-03-main/venv/bin/python main_service.py
-Restart=always
-RestartSec=10
+
+# Python environment
+Environment="PYTHONDONTWRITEBYTECODE=1"
+Environment="PYTHONUNBUFFERED=1"
+Environment="VIRTUAL_ENV=/opt/retrofit/Ph-03-main/.venv"
+Environment="PATH=/opt/retrofit/Ph-03-main/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Pre-start: wait for network stack to fully settle
+ExecStartPre=/bin/sleep 10
+
+# Start using .venv Python
+ExecStart=/opt/retrofit/Ph-03-main/.venv/bin/python3 /opt/retrofit/Ph-03-main/main_service.py
+
+# Restart policy: only restart on non-fatal failures, stop after 3 rapid crashes
+Restart=on-failure
+RestartSec=30
+StartLimitBurst=3
+StartLimitIntervalSec=300
+RestartPreventExitStatus=2 3
+
+# Resource limits (Pi Zero W safety)
+MemoryMax=300M
+CPUQuota=60%
 
 [Install]
 WantedBy=multi-user.target

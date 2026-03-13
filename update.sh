@@ -1,6 +1,14 @@
 #!/bin/bash
 # RetroFit Image Capture Service - Simple OTA updater
-set -e
+
+# Always restart the service on script exit (success or failure), native mode only
+_ensure_service_running() {
+    if ! ([ -f "docker-compose.yml" ] && command -v docker-compose > /dev/null 2>&1); then
+        echo "   -> Ensuring systemd service is running..."
+        sudo systemctl start retrofit-capture.service || true
+    fi
+}
+trap _ensure_service_running EXIT
 
 echo "[1/4] Stopping service..."
 sudo systemctl stop retrofit-capture.service || true
@@ -20,15 +28,22 @@ if [ -f "docker-compose.yml" ] && command -v docker-compose &> /dev/null; then
     docker-compose up -d
 else
     echo "   -> Native environment detected..."
-    if [ ! -d "venv" ]; then
-        python3 -m venv --system-site-packages venv
+    if [ ! -d ".venv" ]; then
+        python3 -m venv --system-site-packages .venv
     fi
-    source venv/bin/activate
-    pip install --no-cache-dir -r requirements.txt
-    deactivate
+    source .venv/bin/activate
 
-    echo "   -> Restarting systemd service..."
-    sudo systemctl start retrofit-capture.service
+    CURRENT_HASH=$(md5sum requirements.txt | awk '{print $1}')
+    STORED_HASH=$(cat .req_hash 2>/dev/null || echo "")
+    if [ "$CURRENT_HASH" != "$STORED_HASH" ]; then
+        echo "   -> requirements.txt changed — installing dependencies..."
+        pip install --no-cache-dir -r requirements.txt && echo "$CURRENT_HASH" > .req_hash
+    else
+        echo "   -> requirements.txt unchanged — skipping pip install."
+    fi
+
+    deactivate
+    # Service restart is handled by the EXIT trap above
 fi
 
 echo "Update complete!"
