@@ -37,6 +37,8 @@ CAMERA_SHARPNESS = 8.0    # picamera2: 1.0=default, 8.0=sharp, 16.0=max — lega
 # AE/AWB Convergence Wait (picamera2 only)
 AE_LOCK_TIMEOUT = 5.0        # Max seconds to wait for AE/AWB to converge before falling back to fixed sleep
 AE_LOCK_POLL_INTERVAL = 0.1  # How often to poll AE lock metadata (seconds)
+AE_WARMUP_FRAMES = 7         # Frames to discard for AE warmup when metadata polling fails.
+                              # Each capture_array() forces a full ISP AE/AWB cycle. 7 frames ≈ 3-4s.
 
 
 # ============================================================

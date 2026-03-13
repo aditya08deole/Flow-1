@@ -27,6 +27,7 @@ try:
     _SHARPNESS = _cfg.CAMERA_SHARPNESS
     _AE_LOCK_TIMEOUT = _cfg.AE_LOCK_TIMEOUT
     _AE_LOCK_POLL_INTERVAL = _cfg.AE_LOCK_POLL_INTERVAL
+    _AE_WARMUP_FRAMES = _cfg.AE_WARMUP_FRAMES
 except Exception:
     _RESOLUTION = (1280, 960)
     _ROTATION = 180
@@ -38,6 +39,7 @@ except Exception:
     _SHARPNESS = 8.0
     _AE_LOCK_TIMEOUT = 5.0
     _AE_LOCK_POLL_INTERVAL = 0.1
+    _AE_WARMUP_FRAMES = 7
 
 # Auto-detect camera library
 USE_PICAMERA2 = False
@@ -122,24 +124,34 @@ def _capture_with_picamera2():
             pass  # Older picamera2 versions may not support this control
 
         # Wait for AE/AWB to converge before capturing (prevents blurry/dark frames)
-        deadline = time.time() + _AE_LOCK_TIMEOUT
-        ae_locked = False
-        while time.time() < deadline:
+        # ── Strategy: try metadata polling first; if the camera doesn't report AeLocked
+        #    (common on libcamera v0.5.x in still mode), fall back to frame-discard warmup.
+        #    Each capture_array() forces the ISP to run one full AE/AWB adjustment cycle.
+        _ae_locked = False
+        _deadline = time.time() + _AE_LOCK_TIMEOUT
+        while time.time() < _deadline:
             try:
-                metadata = picam2.capture_metadata()
-                if metadata.get('AeLocked', False) or metadata.get('AwbConverged', False):
-                    ae_locked = True
+                _meta = picam2.capture_metadata()
+                if _meta.get('AeLocked', False) or _meta.get('AwbConverged', False):
+                    _ae_locked = True
                     break
             except Exception:
                 pass
             time.sleep(_AE_LOCK_POLL_INTERVAL)
 
-        if not ae_locked:
-            time.sleep(2.0)  # Fallback: fixed sleep if metadata polling not supported
-            logging.warning("AE lock not confirmed — proceeding after fallback delay")
+        if not _ae_locked:
+            # Metadata polling timed out (normal on IMX219/libcamera v0.5.x in still mode).
+            # Discard warmup frames so ISP can converge AE before the real capture.
+            logging.warning("AE metadata poll did not confirm lock — running frame-discard warmup")
+            for _i in range(_AE_WARMUP_FRAMES):
+                try:
+                    picam2.capture_array()
+                except Exception:
+                    pass
+            logging.info(f"   -> Frame-discard warmup complete ({_AE_WARMUP_FRAMES} frames)")
         else:
-            elapsed = _AE_LOCK_TIMEOUT - max(0.0, deadline - time.time())
-            logging.info(f"   -> AE/AWB converged after {elapsed:.1f}s")
+            _elapsed = _AE_LOCK_TIMEOUT - max(0.0, _deadline - time.time())
+            logging.info(f"   -> AE/AWB converged after {_elapsed:.1f}s")
 
         # Lock exposure before capture for consistent result
         try:

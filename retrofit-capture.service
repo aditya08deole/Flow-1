@@ -4,6 +4,8 @@ Description=RetroFit Image Capture Service v2.1
 # Documentation: See DEPLOYMENT.md
 After=network-online.target
 Wants=network-online.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
@@ -25,8 +27,6 @@ ExecStart=/opt/retrofit/Ph-03-main/.venv/bin/python3 /opt/retrofit/Ph-03-main/ma
 # Restart policy: only restart on non-fatal failures, stop after 3 rapid crashes
 Restart=on-failure
 RestartSec=30
-StartLimitBurst=3
-StartLimitIntervalSec=300
 RestartPreventExitStatus=2 3
 
 # Resource limits (Pi Zero W safety)
