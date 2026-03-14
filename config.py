@@ -32,13 +32,16 @@ POST_CAPTURE_DELAY = 0.5  # Keep LED ON after capture before turning OFF
 JPEG_QUALITY = 85  # 1-100, 85 gives ~40% smaller files vs 95, no visual diff for meter reading
 
 # Camera Sharpness
-CAMERA_SHARPNESS = 8.0    # picamera2: 1.0=default, 8.0=sharp, 16.0=max — legacy picamera: mapped to 0-100
+CAMERA_SHARPNESS = 4.0    # picamera2: 1.0=default, 8.0=sharp, 16.0=max — legacy picamera: mapped to 0-100
+                          # Reduced from 8.0: over-sharpening adds edge halos that
+                          # hurt ArUco detection on borderline-sharp images.
 
 # AE/AWB Convergence Wait (picamera2 only)
 AE_LOCK_TIMEOUT = 0.5        # Fast-fail: IMX219/libcamera v0.5.x rarely sets AeLocked in preview mode
 AE_LOCK_POLL_INTERVAL = 0.1  # How often to poll AE lock metadata (seconds)
-AE_PREVIEW_DURATION = 3.0    # Seconds to stream in preview mode for AE/AWB to converge (fallback).
+AE_PREVIEW_DURATION = 5.0    # Seconds to stream in preview mode for AE/AWB to converge (fallback).
                               # ISP streams at ~30fps during this wait — convergence is reliable.
+                              # 5.0s is more conservative for Pi Zero W in dim indoor lighting.
 
 
 # ============================================================

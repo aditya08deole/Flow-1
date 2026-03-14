@@ -36,7 +36,7 @@ except Exception:
     _POST_CAPTURE_DELAY = 3.0
     _JPEG_QUALITY = 85
     _LED_PIN = 23
-    _SHARPNESS = 8.0
+    _SHARPNESS = 4.0
     _AE_LOCK_TIMEOUT = 0.5
     _AE_LOCK_POLL_INTERVAL = 0.1
     _AE_PREVIEW_DURATION = 3.0
@@ -131,6 +131,10 @@ def _capture_with_picamera2():
         picam2.set_controls({"Sharpness": _SHARPNESS})
         picam2.start()
 
+        # Allow preview stream to produce its first few frames before polling.
+        # Without this, capture_metadata() may return stale/empty data immediately after start().
+        time.sleep(0.5)
+
         # Poll for AE/AWB convergence. In streaming mode this is more likely to
         # succeed than in still mode. Fast-fail timeout (0.5s) then fixed sleep.
         _ae_locked = False
@@ -155,8 +159,31 @@ def _capture_with_picamera2():
             _elapsed = _AE_LOCK_TIMEOUT - max(0.0, _deadline - time.time())
             logging.info(f"   -> AE/AWB converged after {_elapsed:.1f}s in preview mode")
 
+        # Lock the converged exposure values before the mode switch.
+        # switch_mode_and_capture_array reconfigures the sensor format (640x480→1280x960),
+        # which can cause libcamera to re-run AE convergence on the first still frame.
+        # Freezing ExposureTime + AnalogueGain in the preview stream ensures the correct
+        # exposure carries across the mode boundary into the still capture.
+        _exp_controls = {}
+        try:
+            _final_meta = picam2.capture_metadata()
+            _exp = _final_meta.get('ExposureTime')
+            _gain = _final_meta.get('AnalogueGain')
+            if _exp and _gain:
+                _exp_controls = {
+                    "AeEnable": False,
+                    "ExposureTime": int(_exp),
+                    "AnalogueGain": float(_gain),
+                }
+                logging.info(f"   -> Exposure locked: {int(_exp)}µs, gain {_gain:.3f}x")
+        except Exception as _e:
+            logging.warning(f"   -> Could not lock exposure before still: {_e}")
+
+        if _exp_controls:
+            picam2.set_controls(_exp_controls)
+            time.sleep(0.2)  # ~2-3 preview frames at 30fps to confirm the lock
+
         # Atomically switch to full-res still config and capture.
-        # Inherits converged AE/AWB from the preview stream — no manual lock needed.
         logging.info("   -> Switching to still mode and capturing...")
         image_rgb = picam2.switch_mode_and_capture_array(still_config, "main")
         picam2.stop()
