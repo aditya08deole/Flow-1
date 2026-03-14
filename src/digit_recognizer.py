@@ -99,6 +99,11 @@ def get_sorted_contours(image, min_area=1500):
         List of valid contours sorted left-to-right (may be empty)
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # Enhance local contrast so the black digits stand out more clearly against the wheel
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+    
     gray = cv2.medianBlur(gray, 15)
 
     thresh = cv2.adaptiveThreshold(

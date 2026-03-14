@@ -59,12 +59,12 @@ ARUCO_MARKER_IDS = [0, 1, 2, 3]
 
 # ROI Padding (percentage around detected markers)
 # Positive values expand the box, Negative values shrink the box
-# Expand by 10% to ensure contour detection doesn't fail because digits touch the image border
+# For example, to cut off markers on the right but keep the left intact:
 ROI_PADDING = {
-    "top": 10,     
-    "bottom": 10,  
-    "left": 10,    
-    "right": 10    
+    "top": 0,     # Shrink top 
+    "bottom": 0,  # Shrink bottom 
+    "left": 0,    
+    "right": 0    
 }
 
 # Post-Crop Exact Pixel Trimming
@@ -85,7 +85,7 @@ POST_CROP_TRIM_PX = {
 
 # Blur gate — Laplacian variance below this threshold means the ROI is too blurry
 # for reliable digit inference. Typical sharp images score > 200; blurry < 80.
-BLUR_THRESHOLD = 20.0
+BLUR_THRESHOLD = 10.0
 
 # HOG feature extraction — must match what rf_rasp_classifier.sav was trained on
 DIGIT_RESIZE_H = 90           # Resize height per digit crop (pixels)
