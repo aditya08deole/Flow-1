@@ -23,9 +23,9 @@ ExecStartPre=/bin/sleep 10
 # Start using .venv Python
 ExecStart=__INSTALL_DIR__/.venv/bin/python3 __INSTALL_DIR__/main_service.py
 
-# Restart policy: only restart on non-fatal failures, stop after 3 rapid crashes
-Restart=on-failure
-RestartSec=30
+# Restart policy: aggressive restart to reclaim DMA resources if the script or libcamera faults
+Restart=always
+RestartSec=10
 RestartPreventExitStatus=2 3
 
 # Resource limits (Pi Zero W safety)

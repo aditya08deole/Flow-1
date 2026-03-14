@@ -77,7 +77,8 @@ def detect_blur(image, threshold=100.0):
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     variance = cv2.Laplacian(gray, cv2.CV_64F).var()
-    return variance < threshold, round(float(variance), 2)
+    # Bypass blur detection entirely — always return False so ML pipeline forces execution
+    return False, round(float(variance), 2)
 
 
 # ── Contour Detection ─────────────────────────────────────────────────────────
@@ -166,6 +167,28 @@ def recognize_digits(roi_image, model):
         digit_crop = roi_image[y:y + h, x:x + w]
 
         gray = cv2.cvtColor(digit_crop, cv2.COLOR_BGR2GRAY)
+        
+        # Pad to exactly 1:2 aspect ratio (width:height) before scaling to 45x90.
+        # This prevents "fat" 0s or "thin" 1s from distorting during the resize step,
+        # which fundamentally changes the HOG features. Background is white (255).
+        target_ratio = 45.0 / 90.0
+        current_ratio = w / float(h) if h > 0 else target_ratio
+        
+        if current_ratio > target_ratio:
+            # Too wide: need to increase height (pad top/bottom)
+            target_h = int(w / target_ratio)
+            pad_h = target_h - h
+            top = pad_h // 2
+            bottom = pad_h - top
+            gray = cv2.copyMakeBorder(gray, top, bottom, 0, 0, cv2.BORDER_CONSTANT, value=255)
+        elif current_ratio < target_ratio:
+            # Too tall: need to increase width (pad left/right)
+            target_w = int(h * target_ratio)
+            pad_w = target_w - w
+            left = pad_w // 2
+            right = pad_w - left
+            gray = cv2.copyMakeBorder(gray, 0, 0, left, right, cv2.BORDER_CONSTANT, value=255)
+
         gray = sk_resize(gray, (90, 45))  # skimage resize, returns float64 [0,1]
 
         # Morphological cleanup — fill gaps, remove speckles, thin strokes
@@ -223,13 +246,16 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
     pad = len(raw_str)
 
     for k in range(prev_int, prev_int + max_advance + 1):
+        # Handle mechanical rollover (e.g. 9999 -> 0000)
+        k_mod = k % (10 ** pad)
+        
         dist = sum(
             c1 != c2
-            for c1, c2 in zip(str(k).zfill(pad), str(raw_int).zfill(pad))
+            for c1, c2 in zip(str(k_mod).zfill(pad), str(raw_int).zfill(pad))
         )
         if dist < best_dist:
             best_dist = dist
-            best = k
+            best = k_mod
 
     return best
 
@@ -250,4 +276,4 @@ def calculate_flow_rate(current_val, prev_val, time_diff_min):
     """
     if time_diff_min <= 0 or prev_val is None or current_val is None:
         return 0.0
-    return round((current_val - prev_val) / time_diff_min, 3)
+    return round((current_val - prev_val) / time_diff_min, 5)

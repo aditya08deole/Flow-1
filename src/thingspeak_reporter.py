@@ -56,7 +56,7 @@ class ThingSpeakReporter:
         logger.info(f"✓ ThingSpeak: Channel {self.channel_id} configured")
     
     def send_status(self, status_code, field2_value=None, field3_value=None,
-                    meter_value=None, flow_rate=None) -> bool:
+                    meter_value=None, flow_rate=None, created_at=None) -> bool:
         """
         Send status code to ThingSpeak field1.
 
@@ -66,6 +66,7 @@ class ThingSpeakReporter:
             field3_value: Optional value for field3 (e.g., cycle duration in seconds)
             meter_value: Optional float — detected water meter reading (field4)
             flow_rate: Optional float — flow rate in units/min (field5)
+            created_at: Optional string format ISO 8601 for historical offline updates
 
         Returns:
             True if update was accepted by ThingSpeak, False otherwise
@@ -94,6 +95,8 @@ class ThingSpeakReporter:
             payload['field4'] = round(float(meter_value), 1)
         if flow_rate is not None:
             payload['field5'] = round(float(flow_rate), 3)
+        if created_at is not None:
+            payload['created_at'] = created_at
         
         # Send with retry
         for attempt in range(self.MAX_RETRIES):

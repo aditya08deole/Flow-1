@@ -40,6 +40,7 @@ from thingspeak_reporter import ThingSpeakReporter
 from credential_manager import load_from_config_wm, CredentialError
 from digit_recognizer import (load_model, detect_blur, recognize_digits,
                                apply_hamming_correction, calculate_flow_rate)
+from offline_queue import OfflineQueue
 import config
 
 from logging.handlers import RotatingFileHandler
@@ -180,8 +181,8 @@ class ImageCaptureService:
                                         maxlen=config.STORED_READINGS_MAX)
         self._first_reading = True  # Skip Hamming correction and flow rate on first cycle
 
-        # Upload backlog queue (for retrying failed GDrive uploads)
-        self.upload_backlog = deque(maxlen=MAX_BACKLOG_SIZE)
+        # Persistent SQLite offline queue for failed uploads
+        self.offline_queue = OfflineQueue()
 
         # Service configuration
         self.capture_interval = config.CAPTURE_INTERVAL_MINUTES * 60  # Convert to seconds
@@ -296,7 +297,6 @@ class ImageCaptureService:
                 "message": message,
                 "uptime_cycles": getattr(self, '_cycle_count', 0),
                 "success_count": getattr(self, '_success_count', 0),
-                "backlog_size": len(self.upload_backlog) if hasattr(self, 'upload_backlog') else 0,
                 "last_status_code": getattr(self, '_last_status_code', None),
                 "last_error": getattr(self, '_last_error', ""),
                 "last_filename": getattr(self, '_last_filename', ""),
@@ -319,7 +319,7 @@ class ImageCaptureService:
             pass  # Health file is best-effort
 
     def _send_thingspeak_status(self, status_code, file_size_kb=None, cycle_duration=None,
-                                 meter_value=None, flow_rate=None):
+                                 meter_value=None, flow_rate=None, created_at=None):
         """Send status + edge processing results to ThingSpeak (if configured)."""
         if self.thingspeak is None:
             logging.debug("ThingSpeak not configured — skipping status report")
@@ -328,22 +328,26 @@ class ImageCaptureService:
         try:
             self.thingspeak.send_status(
                 status_code, file_size_kb, cycle_duration,
-                meter_value=meter_value, flow_rate=flow_rate
+                meter_value=meter_value, flow_rate=flow_rate, created_at=created_at
             )
         except Exception as e:
             logging.error(f"ThingSpeak status report failed: {e}")
 
     def _retry_backlog(self):
-        """Retry uploading files from the backlog queue."""
-        if not self.upload_backlog:
+        """Retry uploading files from the SQLite offline queue."""
+        if not self._check_wifi_connectivity():
+            return
+            
+        items = self.offline_queue.pop_all()
+        if not items:
             return
 
-        logging.info(f"📋 Retrying {len(self.upload_backlog)} backlogged uploads...")
+        logging.info(f"📋 Retrying {len(items)} backlogged offline uploads...")
 
-        retried = []
-        while self.upload_backlog:
-            item = self.upload_backlog.popleft()
+        for item in items:
             filepath = item['filepath']
+            meter_val = item['meter_value']
+            status_code = item['status_code']
 
             if not os.path.exists(filepath):
                 logging.warning(f"⚠️  Backlog file missing: {filepath}")
@@ -353,16 +357,17 @@ class ImageCaptureService:
 
             if drive_ok:
                 logging.info(f"✓ Backlog upload succeeded: {os.path.basename(filepath)}")
+                # Re-report the delayed telemetry to ThingSpeak
+                self._send_thingspeak_status(
+                    status_code, 
+                    file_size_kb=os.path.getsize(filepath)/1024,
+                    meter_value=meter_val,
+                    created_at=item.get('timestamp')
+                )
+                time.sleep(2)  # Respect Google Drive API rate limits
             else:
-                retried.append(item)
-
-        # Re-queue items that still failed
-        for item in retried:
-            item['retries'] = item.get('retries', 0) + 1
-            if item['retries'] <= 2:
-                self.upload_backlog.append(item)
-            else:
-                logging.error(f"❌ Permanently failed upload dropped: {item['filepath']}")
+                logging.warning(f"❌ Backlog retry failed: {os.path.basename(filepath)}")
+                self.offline_queue.push(filepath, meter_val, status_code)
 
     def process_cycle(self) -> bool:
         """
@@ -383,11 +388,6 @@ class ImageCaptureService:
             logging.info(f"\n{'─' * 70}")
             logging.info(f"CYCLE START: {timestamp}")
             logging.info(f"{'─' * 70}")
-
-            # Pre-check: WiFi connectivity (skip cycle if network is down)
-            if not self._check_wifi_connectivity():
-                self._write_health("running", "WiFi down — cycle skipped")
-                return False
 
             # Pre-check: Disk space
             if not self._check_disk_space():
@@ -517,48 +517,52 @@ class ImageCaptureService:
             logging.info(f"✓ Image saved: {filename} ({file_size:.1f} KB)")
 
             # Step 4: Upload to Google Drive (with retry and verification)
+            cycle_duration = time.time() - cycle_start
+            
+            # Determine status code
+            status_code = config.THINGSPEAK_STATUS_NO_ARUCO
+            if aruco_detected:
+                status_code = config.THINGSPEAK_STATUS_ARUCO_SUCCESS
+
+            if not self._check_wifi_connectivity():
+                logging.warning("⚠️  WiFi down — queuing image and ML results for offline storage")
+                self.offline_queue.push(str(filepath), meter_value, status_code)
+                return False
+
             logging.info("Step 4/4: Uploading to Google Drive...")
             drive_success = self.drive.upload_with_verification(
                 str(filepath),
                 self.gdrive_folder_id
             )
 
-            cycle_duration = time.time() - cycle_start
-
             if drive_success:
                 logging.info("✓ Google Drive upload successful")
 
-                # Send ThingSpeak status based on ArUco detection
-                if aruco_detected:
-                    # Status 1: ArUco ROI cropped + uploaded successfully
-                    logging.info("ThingSpeak: Sending status=1 (ArUco ROI success)")
-                    self._last_status_code = config.THINGSPEAK_STATUS_ARUCO_SUCCESS
-                    self._last_error = ""
-                    self._last_filename = filename
-                    self._send_thingspeak_status(
-                        config.THINGSPEAK_STATUS_ARUCO_SUCCESS,
-                        file_size_kb=round(file_size, 1),
-                        cycle_duration=round(cycle_duration, 1),
-                        meter_value=meter_value,
-                        flow_rate=flow_rate
-                    )
-                else:
-                    # Status 0: No ArUco, full image uploaded
-                    logging.info("ThingSpeak: Sending status=0 (no ArUco, full image)")
-                    self._last_status_code = config.THINGSPEAK_STATUS_NO_ARUCO
-                    self._last_error = ""
-                    self._last_filename = filename
-                    self._send_thingspeak_status(
-                        config.THINGSPEAK_STATUS_NO_ARUCO,
-                        file_size_kb=round(file_size, 1),
-                        cycle_duration=round(cycle_duration, 1)
-                    )
+                # Send ThingSpeak status
+                logging.info(f"ThingSpeak: Sending status={status_code}")
+                self._last_status_code = status_code
+                self._last_error = ""
+                self._last_filename = filename
+                self._send_thingspeak_status(
+                    status_code,
+                    file_size_kb=round(file_size, 1),
+                    cycle_duration=round(cycle_duration, 1),
+                    meter_value=meter_value,
+                    flow_rate=flow_rate
+                )
 
                 logging.info(f"{'─' * 70}")
                 logging.info(f"✅ CYCLE COMPLETE - GDrive upload successful")
                 logging.info(f"   ArUco: {'✓ detected' if aruco_detected else '✗ not detected'}")
                 logging.info(f"⏱️  Duration: {cycle_duration:.1f}s")
                 logging.info(f"{'─' * 70}\n")
+                
+                # Immediate Space Cleanup: The image hit the cloud, so erase it from the SD card now.
+                try:
+                    filepath.unlink()
+                except Exception as e:
+                    pass
+                
                 return True
             else:
                 logging.error("❌ Google Drive upload failed after retries")
@@ -573,14 +577,8 @@ class ImageCaptureService:
                     cycle_duration=round(cycle_duration, 1)
                 )
 
-                # Queue for retry
-                self.upload_backlog.append({
-                    'filepath': str(filepath),
-                    'aruco_detected': aruco_detected,
-                    'retries': 0,
-                    'timestamp': timestamp
-                })
-                logging.info(f"📋 Queued for retry ({len(self.upload_backlog)} in backlog)")
+                # Queue for offline processing
+                self.offline_queue.push(str(filepath), meter_value, status_code)
 
                 logging.warning(f"{'─' * 70}")
                 logging.warning(f"⚠️  CYCLE COMPLETE - GDrive upload FAILED")
@@ -621,8 +619,6 @@ class ImageCaptureService:
                 logging.info(f"CYCLE #{self._cycle_count} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 if self._cycle_count > 1:
                     logging.info(f"Success Rate: {self._success_count}/{self._cycle_count - 1} ({success_rate:.1f}%)")
-                if self.upload_backlog:
-                    logging.info(f"Upload Backlog: {len(self.upload_backlog)} pending")
                 logging.info(f"{'═' * 70}")
 
                 # Retry any backlogged uploads first
@@ -670,8 +666,8 @@ class ImageCaptureService:
             # Sort by mtime only when cleanup is needed
             images.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
-            # Protect backlog files from deletion
-            backlog_files = {item['filepath'] for item in self.upload_backlog}
+            # Protect offline queue files from deletion
+            backlog_files = self.offline_queue.get_all_filepaths()
 
             for old_image in images[keep_count:]:
                 if str(old_image) not in backlog_files:

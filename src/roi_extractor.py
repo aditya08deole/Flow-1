@@ -171,11 +171,18 @@ def extract_roi(image, cached_pts=None):
                 ])
                 is_cached = False
 
-        # Calculate ROI dimensions
-        x_coords = pts_source[:, 0]
-        y_coords = pts_source[:, 1]
-        roi_w = int(x_coords.max() - x_coords.min())
-        roi_h = int(y_coords.max() - y_coords.min())
+        # Map: TL=1, TR=3, BR=0, BL=2
+        # pts_source is [TL, TR, BR, BL]
+        
+        # Calculate maximum width (Euclidean distance between TL/TR or BL/BR)
+        w_top = np.sqrt(((pts_source[1][0] - pts_source[0][0]) ** 2) + ((pts_source[1][1] - pts_source[0][1]) ** 2))
+        w_bot = np.sqrt(((pts_source[2][0] - pts_source[3][0]) ** 2) + ((pts_source[2][1] - pts_source[3][1]) ** 2))
+        roi_w = max(int(w_top), int(w_bot))
+
+        # Calculate maximum height (Euclidean distance between TR/BR or TL/BL)
+        h_right = np.sqrt(((pts_source[2][0] - pts_source[1][0]) ** 2) + ((pts_source[2][1] - pts_source[1][1]) ** 2))
+        h_left  = np.sqrt(((pts_source[3][0] - pts_source[0][0]) ** 2) + ((pts_source[3][1] - pts_source[0][1]) ** 2))
+        roi_h = max(int(h_right), int(h_left))
 
         # Non-uniform Padding (positive expands, negative shrinks)
         pad_top = int(roi_h * (config.ROI_PADDING.get("top", 0) / 100.0))

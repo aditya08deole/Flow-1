@@ -89,56 +89,67 @@ def _led_off():
         GPIO.output(_LED_PIN, GPIO.LOW)
 
 
+_PICAM2_INSTANCE = None
+_PICAM2_PREVIEW_CONFIG = None
+_PICAM2_STILL_CONFIG = None
+
+def _init_picamera2():
+    """Initialize the global Picamera2 instance and pre-allocate configurations."""
+    global _PICAM2_INSTANCE, _PICAM2_PREVIEW_CONFIG, _PICAM2_STILL_CONFIG
+    if _PICAM2_INSTANCE is not None:
+        return
+        
+    logging.info("   -> Initializing persistent Picamera2 instance...")
+    _PICAM2_INSTANCE = Picamera2()
+    
+    transform = None
+    if _ROTATION in [90, 180, 270]:
+        try:
+            from libcamera import Transform
+            if _ROTATION == 180:
+                transform = Transform(hflip=True, vflip=True)
+            elif _ROTATION == 90:
+                transform = Transform(hflip=False, vflip=True, transpose=True)
+            elif _ROTATION == 270:
+                transform = Transform(hflip=True, vflip=False, transpose=True)
+        except ImportError:
+            logging.warning("libcamera.Transform not available — rotation skipped")
+
+    _t_kwargs = {"transform": transform} if transform is not None else {}
+
+    _PICAM2_PREVIEW_CONFIG = _PICAM2_INSTANCE.create_preview_configuration(
+        main={"size": (640, 480), "format": "RGB888"}, **_t_kwargs
+    )
+    _PICAM2_STILL_CONFIG = _PICAM2_INSTANCE.create_still_configuration(
+        main={"size": _RESOLUTION, "format": "RGB888"},
+        controls={"NoiseReductionMode": 0},  # Off: disable ISP spatial NR which blurs digit/ArUco edges
+        **_t_kwargs
+    )
+    atexit.register(_cleanup_picam2)
+
+def _cleanup_picam2():
+    global _PICAM2_INSTANCE
+    if _PICAM2_INSTANCE is not None:
+        try:
+            _PICAM2_INSTANCE.stop()
+            _PICAM2_INSTANCE.close()
+        except:
+            pass
+        _PICAM2_INSTANCE = None
+
 def _capture_with_picamera2():
-    """Capture image using picamera2 — preview-mode AE warmup then still capture.
-
-    Strategy: start in preview/video mode (ISP streams at ~30fps, AE/AWB converge
-    naturally), then use switch_mode_and_capture_array() to atomically switch to
-    full-resolution still config and capture. This is the official picamera2 pattern
-    for a sharp, well-exposed still image.
-    """
-    picam2 = Picamera2()
+    """Capture image using persistent picamera2 instance."""
+    _init_picamera2()
+    picam2 = _PICAM2_INSTANCE
+    
     try:
-        # Build transform for rotation
-        transform = None
-        if _ROTATION in [90, 180, 270]:
-            try:
-                from libcamera import Transform
-                if _ROTATION == 180:
-                    transform = Transform(hflip=True, vflip=True)
-                elif _ROTATION == 90:
-                    transform = Transform(hflip=False, vflip=True, transpose=True)
-                elif _ROTATION == 270:
-                    transform = Transform(hflip=True, vflip=False, transpose=True)
-            except ImportError:
-                logging.warning("libcamera.Transform not available — rotation skipped")
-
-        _t_kwargs = {"transform": transform} if transform is not None else {}
-
-        # Create BOTH configs upfront.
-        # Preview at 640x480: fast to stream, enough for AE convergence at ~30fps.
-        # Still at full resolution: final high-quality capture.
-        preview_config = picam2.create_preview_configuration(
-            main={"size": (640, 480), "format": "RGB888"}, **_t_kwargs
-        )
-        still_config = picam2.create_still_configuration(
-            main={"size": _RESOLUTION, "format": "RGB888"},
-            controls={"NoiseReductionMode": 0},  # Off: disable ISP spatial NR which blurs digit/ArUco edges
-            **_t_kwargs
-        )
-
-        # Start in PREVIEW mode — ISP streams at ~30fps, AE/AWB converge naturally.
-        # This is far more effective than still-mode warmup (~2.3s/frame).
-        picam2.configure(preview_config)
+        # Start in PREVIEW mode
+        picam2.configure(_PICAM2_PREVIEW_CONFIG)
         picam2.set_controls({"Sharpness": _SHARPNESS})
         picam2.start()
 
-        # Allow preview stream to produce its first few frames before polling.
-        # Without this, capture_metadata() may return stale/empty data immediately after start().
         time.sleep(0.5)
 
-        # Poll for AE/AWB convergence. In streaming mode this is more likely to
-        # succeed than in still mode. Fast-fail timeout (0.5s) then fixed sleep.
         _ae_locked = False
         _deadline = time.time() + _AE_LOCK_TIMEOUT
         while time.time() < _deadline:
@@ -152,20 +163,12 @@ def _capture_with_picamera2():
             time.sleep(_AE_LOCK_POLL_INTERVAL)
 
         if not _ae_locked:
-            # ISP is still streaming and actively converging AE during this sleep.
             time.sleep(_AE_PREVIEW_DURATION)
-            logging.warning(
-                f"AE metadata poll timed out — waited {_AE_PREVIEW_DURATION}s in preview mode"
-            )
+            logging.warning(f"AE metadata poll timed out — waited {_AE_PREVIEW_DURATION}s in preview mode")
         else:
             _elapsed = _AE_LOCK_TIMEOUT - max(0.0, _deadline - time.time())
-            logging.info(f"   -> AE/AWB converged after {_elapsed:.1f}s in preview mode")
-
-        # Lock the converged exposure values before the mode switch.
-        # switch_mode_and_capture_array reconfigures the sensor format (640x480→1280x960),
-        # which can cause libcamera to re-run AE convergence on the first still frame.
-        # Freezing ExposureTime + AnalogueGain in the preview stream ensures the correct
-        # exposure carries across the mode boundary into the still capture.
+            logging.info(f"   -> AE/AWB converged after {_elapsed:.1f}s")
+            
         _exp_controls = {}
         try:
             _final_meta = picam2.capture_metadata()
@@ -183,17 +186,18 @@ def _capture_with_picamera2():
 
         if _exp_controls:
             picam2.set_controls(_exp_controls)
-            time.sleep(0.2)  # ~2-3 preview frames at 30fps to confirm the lock
-
-        # Atomically switch to full-res still config and capture.
+            time.sleep(0.2)
+            
         logging.info("   -> Switching to still mode and capturing...")
-        image_rgb = picam2.switch_mode_and_capture_array(still_config, "main")
-        picam2.stop()
+        image_rgb = picam2.switch_mode_and_capture_array(_PICAM2_STILL_CONFIG, "main")
+        
+        # Stop stream to save power between cycles, but DO NOT close() so we keep DMA buffers
+        picam2.stop() 
 
-        # Convert RGB to BGR for OpenCV
         return cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
-    finally:
-        picam2.close()
+    except Exception as e:
+        picam2.stop()
+        raise e
 
 
 def _capture_with_picamera():
