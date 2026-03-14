@@ -24,9 +24,12 @@ CAMERA_RESOLUTION = (1280, 960)  # Width x Height in pixels
 CAMERA_ROTATION = 180  # Adjust based on physical camera orientation
 
 # Camera Timing Sequence (seconds)
-WARMUP_DELAY = 0.5        # Delay after LED ON before starting camera (0.2 was too short for LED to stabilise)
-FOCUS_DELAY = 3.5         # Focus adjustment time — legacy picamera AE/AWB needs 3-5s in indoor lighting
-POST_CAPTURE_DELAY = 0.5  # Keep LED ON after capture before turning OFF
+# Sequence: LED ON → WARMUP_DELAY → Camera starts → AE warmup → Capture → POST_CAPTURE_DELAY → LED OFF
+WARMUP_DELAY = 1.0        # 1s delay after LED ON before camera starts — LED reaches full brightness,
+                          # scene is fully lit before ISP meters exposure for AE convergence.
+FOCUS_DELAY = 5.0         # Legacy picamera AE/AWB warmup — 5s in still mode for indoor lighting convergence.
+POST_CAPTURE_DELAY = 1.0  # 1s LED stays ON after capture — ensures full sensor read-out completes
+                          # before light is cut; prevents partial-frame exposure on next attempt.
 
 # Image Quality
 JPEG_QUALITY = 85  # 1-100, 85 gives ~40% smaller files vs 95, no visual diff for meter reading

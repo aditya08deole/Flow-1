@@ -31,15 +31,15 @@ try:
 except Exception:
     _RESOLUTION = (1280, 960)
     _ROTATION = 180
-    _WARMUP_DELAY = 0.5
-    _FOCUS_DELAY = 3.0
-    _POST_CAPTURE_DELAY = 3.0
+    _WARMUP_DELAY = 1.0
+    _FOCUS_DELAY = 5.0
+    _POST_CAPTURE_DELAY = 1.0
     _JPEG_QUALITY = 85
     _LED_PIN = 23
     _SHARPNESS = 4.0
     _AE_LOCK_TIMEOUT = 0.5
     _AE_LOCK_POLL_INTERVAL = 0.1
-    _AE_PREVIEW_DURATION = 3.0
+    _AE_PREVIEW_DURATION = 5.0
 
 # Auto-detect camera library
 USE_PICAMERA2 = False
@@ -122,7 +122,9 @@ def _capture_with_picamera2():
             main={"size": (640, 480), "format": "RGB888"}, **_t_kwargs
         )
         still_config = picam2.create_still_configuration(
-            main={"size": _RESOLUTION, "format": "RGB888"}, **_t_kwargs
+            main={"size": _RESOLUTION, "format": "RGB888"},
+            controls={"NoiseReductionMode": 0},  # Off: disable ISP spatial NR which blurs digit/ArUco edges
+            **_t_kwargs
         )
 
         # Start in PREVIEW mode — ISP streams at ~30fps, AE/AWB converge naturally.
