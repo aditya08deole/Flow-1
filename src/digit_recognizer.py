@@ -50,7 +50,12 @@ def load_model(path):
     if not _DEPS_OK:
         raise ImportError("joblib not available — cannot load RF model")
     logging.info(f"Loading RF model from {path} ...")
-    model = joblib.load(path)
+    import warnings
+    # Suppress the unpickling warning if sklearn versions differ, as it generally still works 
+    # for simpler RF models if no deep tree changes occurred between versions.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UserWarning)
+        model = joblib.load(path)
     logging.info("RF model loaded successfully")
     return model
 

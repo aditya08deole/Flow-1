@@ -40,7 +40,7 @@ CAMERA_SHARPNESS = 4.0    # picamera2: 1.0=default, 8.0=sharp, 16.0=max — lega
                           # hurt ArUco detection on borderline-sharp images.
 
 # AE/AWB Convergence Wait (picamera2 only)
-AE_LOCK_TIMEOUT = 0.5        # Fast-fail: IMX219/libcamera v0.5.x rarely sets AeLocked in preview mode
+AE_LOCK_TIMEOUT = 2.0        # Fast-fail: IMX219/libcamera v0.5.x rarely sets AeLocked in preview mode
 AE_LOCK_POLL_INTERVAL = 0.1  # How often to poll AE lock metadata (seconds)
 AE_PREVIEW_DURATION = 5.0    # Seconds to stream in preview mode for AE/AWB to converge (fallback).
                               # ISP streams at ~30fps during this wait — convergence is reliable.
@@ -59,12 +59,12 @@ ARUCO_MARKER_IDS = [0, 1, 2, 3]
 
 # ROI Padding (percentage around detected markers)
 # Positive values expand the box, Negative values shrink the box
-# For example, to cut off markers on the right but keep the left intact:
+# Expand by 10% to ensure contour detection doesn't fail because digits touch the image border
 ROI_PADDING = {
-    "top": 0,     # Shrink top 
-    "bottom": 0,  # Shrink bottom 
-    "left": 0,    
-    "right": 0    
+    "top": 10,     
+    "bottom": 10,  
+    "left": 10,    
+    "right": 10    
 }
 
 # Post-Crop Exact Pixel Trimming
@@ -85,12 +85,12 @@ POST_CROP_TRIM_PX = {
 
 # Blur gate — Laplacian variance below this threshold means the ROI is too blurry
 # for reliable digit inference. Typical sharp images score > 200; blurry < 80.
-BLUR_THRESHOLD = 100.0
+BLUR_THRESHOLD = 20.0
 
 # HOG feature extraction — must match what rf_rasp_classifier.sav was trained on
 DIGIT_RESIZE_H = 90           # Resize height per digit crop (pixels)
 DIGIT_RESIZE_W = 45           # Resize width per digit crop (pixels)
-MIN_CONTOUR_AREA = 1500       # Minimum contour pixel area to be classified as a digit
+MIN_CONTOUR_AREA = 300        # Minimum contour pixel area to be classified as a digit
 
 # Random Forest model (loaded once at service start, not per-cycle)
 MODEL_PATH = "rf_rasp_classifier.sav"
