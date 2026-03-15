@@ -491,12 +491,16 @@ class ImageCaptureService:
                     )
                 else:
                     logging.info(f"[Step 3.5] Blur OK (Laplacian={blur_var:.1f}) — running digit recognition")
-                    raw_str = recognize_digits(upload_image, self._rf_model)
+                    raw_str, num_decimals = recognize_digits(upload_image, self._rf_model)
 
                     if raw_str:
                         now = datetime.now()
+                        # Use the dynamically detected decimal count from the ink color,
+                        # but fall back to the config if the camera couldn't see any colors.
+                        actual_decimals = num_decimals if num_decimals > 0 else config.DECIMAL_DIGITS
+
                         prev_int = (
-                            int(self._stored_values[-1] * 10)
+                            int(self._stored_values[-1] * (10 ** actual_decimals))
                             if not self._first_reading and self._stored_values[-1] is not None
                             else None
                         )
@@ -506,7 +510,7 @@ class ImageCaptureService:
                             else 1.0
                         )
                         corrected_int = apply_hamming_correction(raw_str, prev_int, t_diff)
-                        meter_value = corrected_int / (10 ** config.DECIMAL_DIGITS)
+                        meter_value = corrected_int / float(10 ** actual_decimals)
 
                         if not self._first_reading and self._stored_values[-1] is not None:
                             flow_rate = calculate_flow_rate(
