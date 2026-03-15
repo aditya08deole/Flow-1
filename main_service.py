@@ -180,6 +180,21 @@ class ImageCaptureService:
         self._stored_timestamps = deque([None] * config.STORED_READINGS_MAX,
                                         maxlen=config.STORED_READINGS_MAX)
         self._first_reading = True  # Skip Hamming correction and flow rate on first cycle
+        
+        # Restore state from legacy Variable.txt if it exists
+        try:
+            var_path = Path("Variable.txt")
+            if var_path.exists():
+                with open(var_path, "r") as f:
+                    content = f.read().strip()
+                if content:
+                    legacy_val = float(content)
+                    self._stored_values.append(legacy_val)
+                    self._stored_timestamps.append(datetime.now())
+                    self._first_reading = False
+                    logging.info(f"💾 Restored persistent state from Variable.txt: {legacy_val:.1f}")
+        except Exception as e:
+            logging.warning(f"⚠️  Could not read Variable.txt state: {e}")
 
         # Persistent SQLite offline queue for failed uploads
         self.offline_queue = OfflineQueue()
@@ -500,6 +515,15 @@ class ImageCaptureService:
                         self._stored_values.append(meter_value)
                         self._stored_timestamps.append(now)
                         self._first_reading = False
+                        
+                        # Persist state to disk for crash resilience
+                        try:
+                            with open("Variable.txt", "w") as f:
+                                f.write(str(meter_value))
+                            with open("var2.txt", "w") as f:
+                                f.write(str(meter_value))
+                        except Exception as e:
+                            logging.warning(f"⚠️  Could not write state to Variable.txt/var2.txt: {e}")
 
                         logging.info(
                             f"[Step 3.5] Meter={meter_value:.1f}  "
