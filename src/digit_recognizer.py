@@ -162,46 +162,6 @@ def get_sorted_contours(image, min_area=1500):
 
 # ── HOG + RF Digit Classification ─────────────────────────────────────────────
 
-def is_colored_digit(bgr_crop):
-    """
-    Check if a digit crop contains significant red or blue ink using HSV color space.
-    Returns True if it's a decimal digit (red/blue), False if whole number (black).
-    """
-    hsv = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2HSV)
-    
-    # Isolate the dark ink from the white background
-    gray = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2GRAY)
-    _, ink_mask = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
-    
-    ink_pixels = cv2.countNonZero(ink_mask)
-    if ink_pixels < 20: # Avoid div by zero or extreme noise
-        return False
-        
-    # Blue HSV range
-    lower_blue = np.array([90, 50, 40])
-    upper_blue = np.array([150, 255, 255])
-    
-    # Red HSV range (wraps around 180 in OpenCV)
-    lower_red1 = np.array([0, 50, 40])
-    upper_red1 = np.array([15, 255, 255])
-    lower_red2 = np.array([165, 50, 40])
-    upper_red2 = np.array([180, 255, 255])
-    
-    mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
-    mask_red1 = cv2.inRange(hsv, lower_red1, upper_red1)
-    mask_red2 = cv2.inRange(hsv, lower_red2, upper_red2)
-    mask_red = cv2.bitwise_or(mask_red1, mask_red2)
-    
-    # Combine red and blue masks, AND with ink mask to only count colored ink
-    mask_color = cv2.bitwise_or(mask_blue, mask_red)
-    mask_colored_ink = cv2.bitwise_and(mask_color, ink_mask)
-    
-    colored_pixels = cv2.countNonZero(mask_colored_ink)
-    
-    # If more than 15% of the ink is red or blue, consider it a colored digit
-    return (colored_pixels / float(ink_pixels)) > 0.15
-
-
 def recognize_digits(roi_image, model):
     """
     Classify all digits in a ROI using HOG features + Random Forest.
@@ -220,7 +180,7 @@ def recognize_digits(roi_image, model):
         model: Loaded sklearn Random Forest model
 
     Returns:
-        Digit string e.g. "012345" or None if no contours found
+        Digit string e.g. "01234567" or None if no contours found
     """
     if not _DEPS_OK:
         logging.error("Digit recognition dependencies not available")
@@ -228,20 +188,16 @@ def recognize_digits(roi_image, model):
 
     contours = get_sorted_contours(roi_image)
     if not contours or len(contours) < 4:
-        logging.warning(f"[Step 3] Recognition rejected: Only found {len(contours) if contours else 0} digit contours (expected ~8). Image too dark or noisy.")
-        return None, 0
+        logging.warning(f"[Step 3] Recognition rejected: Only found {len(contours) if contours else 0} digit contours (expected 8). Noise/Shadow detected.")
+        return None
 
     e3  = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     e11 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     result = ""
-    colored_flags = []
 
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
         digit_crop = roi_image[y:y + h, x:x + w]
-        
-        colored_flags.append(is_colored_digit(digit_crop))
-
         gray = cv2.cvtColor(digit_crop, cv2.COLOR_BGR2GRAY)
         
         # Pad to exactly 1:2 aspect ratio (width:height) before scaling to 45x90.
@@ -286,16 +242,7 @@ def recognize_digits(roi_image, model):
         digit = str(model.predict(features.reshape(1, -1))[0])
         result += digit
 
-    num_decimals = 0
-    if result:
-        # Count colored digits from right to left
-        for is_colored in reversed(colored_flags):
-            if is_colored:
-                num_decimals += 1
-            else:
-                break
-
-    return (result, num_decimals) if result else (None, 0)
+    return result if result else None
 
 
 # ── Hamming Distance Correction ───────────────────────────────────────────────

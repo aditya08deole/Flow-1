@@ -181,6 +181,11 @@ class ImageCaptureService:
                                         maxlen=config.STORED_READINGS_MAX)
         self._first_reading = True  # Skip Hamming correction and flow rate on first cycle
         
+        # State-Lead Decimal Calibration: 
+        # Detect exactly how many numbers are after the decimal in Variable.txt
+        self.calibrated_decimals = config.DECIMAL_DIGITS 
+
+        
         # Restore state from legacy Variable.txt if it exists
         try:
             var_path = Path("Variable.txt")
@@ -188,11 +193,17 @@ class ImageCaptureService:
                 with open(var_path, "r") as f:
                     content = f.read().strip()
                 if content:
+                    # Detect decimal count (e.g. "12.34" -> 2)
+                    if "." in content:
+                        self.calibrated_decimals = len(content.split(".")[1])
+                    else:
+                        self.calibrated_decimals = 0
+                    
                     legacy_val = float(content)
                     self._stored_values.append(legacy_val)
                     self._stored_timestamps.append(datetime.now())
                     self._first_reading = False
-                    logging.info(f"💾 Restored persistent state from Variable.txt: {legacy_val:.1f}")
+                    logging.info(f"💾 Restored state from Variable.txt: {legacy_val:.{self.calibrated_decimals}f} (Calibration: {self.calibrated_decimals} decimals)")
         except Exception as e:
             logging.warning(f"⚠️  Could not read Variable.txt state: {e}")
 
@@ -491,16 +502,12 @@ class ImageCaptureService:
                     )
                 else:
                     logging.info(f"[Step 3.5] Blur OK (Laplacian={blur_var:.1f}) — running digit recognition")
-                    raw_str, num_decimals = recognize_digits(upload_image, self._rf_model)
+                    raw_str = recognize_digits(upload_image, self._rf_model)
 
                     if raw_str:
                         now = datetime.now()
-                        # Use the dynamically detected decimal count from the ink color,
-                        # but fall back to the config if the camera couldn't see any colors.
-                        actual_decimals = num_decimals if num_decimals > 0 else config.DECIMAL_DIGITS
-
                         prev_int = (
-                            int(self._stored_values[-1] * (10 ** actual_decimals))
+                            int(self._stored_values[-1] * (10 ** self.calibrated_decimals))
                             if not self._first_reading and self._stored_values[-1] is not None
                             else None
                         )
@@ -510,7 +517,7 @@ class ImageCaptureService:
                             else 1.0
                         )
                         corrected_int = apply_hamming_correction(raw_str, prev_int, t_diff)
-                        meter_value = corrected_int / float(10 ** actual_decimals)
+                        meter_value = corrected_int / float(10 ** self.calibrated_decimals)
 
                         if not self._first_reading and self._stored_values[-1] is not None:
                             flow_rate = calculate_flow_rate(
@@ -522,15 +529,17 @@ class ImageCaptureService:
                         
                         # Persist state to disk for crash resilience
                         try:
+                            # Format with exact calibrated precision
+                            val_str = f"{meter_value:.{self.calibrated_decimals}f}"
                             with open("Variable.txt", "w") as f:
-                                f.write(str(meter_value))
+                                f.write(val_str)
                             with open("var2.txt", "w") as f:
-                                f.write(str(meter_value))
+                                f.write(val_str)
                         except Exception as e:
                             logging.warning(f"⚠️  Could not write state to Variable.txt/var2.txt: {e}")
 
                         logging.info(
-                            f"[Step 3.5] Meter={meter_value:.1f}  "
+                            f"[Step 3.5] Meter={meter_value:.{self.calibrated_decimals}f}  "
                             f"Flow={flow_rate if flow_rate is not None else 'n/a'} units/min"
                         )
                     else:
