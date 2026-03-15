@@ -227,9 +227,9 @@ def recognize_digits(roi_image, model):
         return None
 
     contours = get_sorted_contours(roi_image)
-    if not contours:
-        logging.warning("[Step 3] Digit recognition: no contours found in ROI")
-        return None
+    if not contours or len(contours) < 4:
+        logging.warning(f"[Step 3] Recognition rejected: Only found {len(contours) if contours else 0} digit contours (expected ~8). Image too dark or noisy.")
+        return None, 0
 
     e3  = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     e11 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
