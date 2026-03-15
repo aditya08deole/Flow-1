@@ -18,6 +18,11 @@ Pipeline:
 import cv2
 import numpy as np
 import logging
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import config
 
 try:
     import joblib
@@ -123,8 +128,36 @@ def get_sorted_contours(image, min_area=1500):
     if not contours:
         return []
 
-    (contours, _) = imutils_sort_contours(contours)
-    return [c for c in contours if cv2.contourArea(c) >= min_area]
+    actual_min_area = getattr(config, 'MIN_CONTOUR_AREA', min_area)
+
+    # 1. Filter out contours that don't geometrically resemble a digit
+    valid_boxes = []
+    for c in contours:
+        if cv2.contourArea(c) < actual_min_area:
+            continue
+        
+        x, y, w, h = cv2.boundingRect(c)
+        aspect_ratio = w / float(h)
+        
+        # Digits are taller than they are wide.
+        # Prevent picking up dial seams (too thin) or merged artifacts (too wide)
+        if 0.15 <= aspect_ratio <= 1.0:
+            valid_boxes.append((c, x, y, w, h))
+
+    if not valid_boxes:
+        return []
+
+    # 2. Enforce height similarity (digits in a meter are exactly the same physical height)
+    # Reject short background noise or tall vertical glare lines
+    median_h = np.median([b[4] for b in valid_boxes])
+    valid_contours = [b[0] for b in valid_boxes if 0.70 * median_h <= b[4] <= 1.30 * median_h]
+
+    if not valid_contours:
+        return []
+
+    # Sort left-to-right
+    (valid_contours, _) = imutils_sort_contours(valid_contours)
+    return valid_contours
 
 
 # ── HOG + RF Digit Classification ─────────────────────────────────────────────
