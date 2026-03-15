@@ -342,6 +342,14 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
             best_dist = dist
             best = k_mod
 
+    # Desync Protection: If the anchor in Variable.txt is completely wrong
+    # (e.g., 0 while the meter is 46,000,000), every digit will mismatch.
+    # In this case, we MUST break the anchor and trust the current AI reading.
+    if best_dist >= pad - 1 and pad > 3:
+        import logging
+        logging.warning(f"⚠️  Hamming anchor totally desynced (dist={best_dist}/{pad}). Forcing resync to {raw_int}")
+        return raw_int
+
     return best
 
 
