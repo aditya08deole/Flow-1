@@ -133,21 +133,23 @@ def extract_roi(image, cached_pts=None):
             else:
                 return None, None, False
         else:
-            # Use the inner corner of each marker (the corner pointing INTO the meter area)
-            # This gives a tighter, more stable crop than averaging all 4 corners to a center point.
-            #   ID 1 (TL) → bottom-right corner (index 2) — faces meter
-            #   ID 3 (TR) → bottom-left corner  (index 3) — faces meter
-            #   ID 0 (BR) → top-left corner     (index 0) — faces meter
-            #   ID 2 (BL) → top-right corner    (index 1) — faces meter
-            INNER_CORNER_IDX = {1: 2, 3: 3, 0: 0, 2: 1}
+            # 1. Calculate centroid of all detected markers to find the "inner" direction
+            marker_centroids = []
+            for corner_arr in corners:
+                marker_centroids.append(np.mean(corner_arr[0], axis=0))
+            overall_centroid = np.mean(marker_centroids, axis=0)
 
+            # 2. Select the corner of each marker closest to the overall centroid
+            # This is topologically guaranteed to be the inner corner facing the meter display,
+            # regardless of marker rotation or perspective skew.
             found = {}
             for corner_arr, mid in zip(corners, ids.flatten()):
                 mid = int(mid)
-                if mid in INNER_CORNER_IDX:
-                    cidx = INNER_CORNER_IDX[mid]
-                    pt = corner_arr[0][cidx]  # corner_arr shape: (1, 4, 2)
-                    found[mid] = [float(pt[0]), float(pt[1])]
+                if mid in [0, 1, 2, 3]:
+                    # Find corner closest to overall centroid
+                    dists = [np.linalg.norm(c - overall_centroid) for c in corner_arr[0]]
+                    inner_idx = np.argmin(dists)
+                    found[mid] = corner_arr[0][inner_idx].astype(float).tolist()
 
             # Verify all 4 required markers exist
             required = [0, 1, 2, 3]
@@ -174,15 +176,15 @@ def extract_roi(image, cached_pts=None):
         # Map: TL=1, TR=3, BR=0, BL=2
         # pts_source is [TL, TR, BR, BL]
         
-        # Calculate maximum width (Euclidean distance between TL/TR or BL/BR)
-        w_top = np.sqrt(((pts_source[1][0] - pts_source[0][0]) ** 2) + ((pts_source[1][1] - pts_source[0][1]) ** 2))
-        w_bot = np.sqrt(((pts_source[2][0] - pts_source[3][0]) ** 2) + ((pts_source[2][1] - pts_source[3][1]) ** 2))
-        roi_w = max(int(w_top), int(w_bot))
+        # Calculate dimensions for the corrected output
+        # Use average of top/bottom and left/right to stabilize the aspect ratio
+        w_top = np.linalg.norm(pts_source[1] - pts_source[0])
+        w_bot = np.linalg.norm(pts_source[2] - pts_source[3])
+        roi_w = int((w_top + w_bot) / 2)
 
-        # Calculate maximum height (Euclidean distance between TR/BR or TL/BL)
-        h_right = np.sqrt(((pts_source[2][0] - pts_source[1][0]) ** 2) + ((pts_source[2][1] - pts_source[1][1]) ** 2))
-        h_left  = np.sqrt(((pts_source[3][0] - pts_source[0][0]) ** 2) + ((pts_source[3][1] - pts_source[0][1]) ** 2))
-        roi_h = max(int(h_right), int(h_left))
+        h_right = np.linalg.norm(pts_source[2] - pts_source[1])
+        h_left  = np.linalg.norm(pts_source[3] - pts_source[0])
+        roi_h = int((h_right + h_left) / 2)
 
         # Non-uniform Padding (positive expands, negative shrinks)
         pad_top = int(roi_h * (config.ROI_PADDING.get("top", 0) / 100.0))

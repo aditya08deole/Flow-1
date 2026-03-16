@@ -80,8 +80,8 @@ class ImageCaptureService:
     def __init__(self):
         """Initialize service with credentials, GDrive uploader, and ThingSpeak reporter."""
         logging.info("=" * 70)
-        logging.info("RetroFit Image Capture Service v2.1 - Starting")
-        logging.info("Pipeline: Capture → GDrive Upload → ThingSpeak Status")
+        logging.info("RetroFit Image Capture Service v2.7 - Starting")
+        logging.info("Pipeline: Capture → GDrive Upload → SpikeGuard → ThingSpeak")
         logging.info("=" * 70)
 
         # Register signal handlers for graceful shutdown
@@ -105,7 +105,7 @@ class ImageCaptureService:
             )
 
             self.device_id = self.credentials['device_id']
-            self.node_name = self.credentials['node_name']
+            self.node_name = self.credentials.get('node_name', 'Unknown')
 
             logging.info(f"✓ Device ID: {self.device_id}")
             logging.info(f"✓ Node Name: {self.node_name}")
@@ -515,9 +515,11 @@ class ImageCaptureService:
 
                     if raw_str:
                         now = datetime.now()
+                        prev_val = self._stored_values[-1] if not self._first_reading else None
+                        
                         prev_int = (
-                            int(self._stored_values[-1] * (10 ** self.calibrated_decimals))
-                            if not self._first_reading and self._stored_values[-1] is not None
+                            int(prev_val * (10 ** self.calibrated_decimals))
+                            if prev_val is not None
                             else None
                         )
                         t_diff = (
@@ -525,16 +527,50 @@ class ImageCaptureService:
                             if not self._first_reading and self._stored_timestamps[-1] is not None
                             else 1.0
                         )
-                        corrected_int = apply_hamming_correction(raw_str, prev_int, t_diff)
-                        meter_value = corrected_int / float(10 ** self.calibrated_decimals)
 
-                        if not self._first_reading and self._stored_values[-1] is not None:
-                            flow_rate = calculate_flow_rate(
-                                meter_value, self._stored_values[-1], t_diff)
+                        # SpikeGuard Logic: Retry up to 3 times if reading is unplausible
+                        for retry_idx in range(1, config.MAX_RECOGNITION_RETRIES + 1):
+                            corrected_int = apply_hamming_correction(raw_str, prev_int, t_diff)
+                            meter_value = corrected_int / float(10 ** self.calibrated_decimals)
 
-                        self._stored_values.append(meter_value)
-                        self._stored_timestamps.append(now)
-                        self._first_reading = False
+                            # Check for unusual spikes (> 500L in 5 mins)
+                            is_spike = False
+                            if prev_val is not None:
+                                delta = abs(meter_value - prev_val)
+                                # Handle rollover (9999->0) - only spike if delta is huge and not a near-rollover
+                                # For instance, if delta > 90% of MAX_METER_POWER, it's likely a rollover, not a spike
+                                if delta > config.MAX_PLAUSIBLE_FLOW_DELTA:
+                                    # Very loose rollover check
+                                    if delta < (config.METER_READING_MAX_POWER / (10 ** self.calibrated_decimals)) * 0.9:
+                                        is_spike = True
+
+                            if not is_spike:
+                                if retry_idx > 1:
+                                    logging.info(f"✅ SpikeGuard: Reading stabilized on retry #{retry_idx}")
+                                break
+                            
+                            logging.warning(
+                                f"⚠️ SpikeGuard Detection (#{retry_idx}): Unusual trend ({meter_value} from {prev_val}). "
+                                f"Delta={abs(meter_value-prev_val):.2f} exceeds {config.MAX_PLAUSIBLE_FLOW_DELTA}. "
+                                f"Retrying recognition..."
+                            )
+                            # Re-run recognition (maybe different contours picked or noise varies)
+                            raw_str = recognize_digits(upload_image, self._rf_model)
+                            if not raw_str:
+                                break
+
+                        if is_spike:
+                            logging.error(f"❌ SpikeGuard: DISCARDING reading after {config.MAX_RECOGNITION_RETRIES} attempts. Value {meter_value} is unplausible.")
+                            meter_value = None
+                            flow_rate = None
+                            # We'll use status 3 later
+                        else:
+                            if not self._first_reading and prev_val is not None:
+                                flow_rate = calculate_flow_rate(meter_value, prev_val, t_diff)
+
+                            self._stored_values.append(meter_value)
+                            self._stored_timestamps.append(now)
+                            self._first_reading = False
                         
                         # Persist state to disk for crash resilience
                         try:
@@ -568,7 +604,11 @@ class ImageCaptureService:
             # Determine status code
             status_code = config.THINGSPEAK_STATUS_NO_ARUCO
             if aruco_detected:
-                status_code = config.THINGSPEAK_STATUS_ARUCO_SUCCESS
+                if aruco_detected and meter_value is None and not is_blurry:
+                    # ArUco okay, image clear, but SpikeGuard discarded the reading
+                    status_code = config.THINGSPEAK_STATUS_RECOGNITION_ERROR
+                else:
+                    status_code = config.THINGSPEAK_STATUS_ARUCO_SUCCESS
 
             if not self._check_wifi_connectivity():
                 logging.warning("⚠️  WiFi down — queuing image and ML results for offline storage")

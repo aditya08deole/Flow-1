@@ -97,7 +97,9 @@ MODEL_PATH = "rf_rasp_classifier.sav"
 
 # Meter reading interpretation
 DECIMAL_DIGITS = 1            # Rightmost N digits are decimal places (e.g. 01234 → 123.4)
-STORED_READINGS_MAX = 5       # Rolling window size for flow rate calculation
+METER_READING_MAX_POWER = 100000000     # 99,999,999.99 for 8-digit meter
+MAX_PLAUSIBLE_FLOW_DELTA = 500.0        # Max units (e.g. Liters) possible in 5 minutes
+MAX_RECOGNITION_RETRIES = 3             # Number of times to retry if a spike is detected
 
 
 # ============================================================
@@ -128,6 +130,7 @@ THINGSPEAK_UPDATE_URL = "https://api.thingspeak.com/update"
 THINGSPEAK_STATUS_ARUCO_SUCCESS = 1
 THINGSPEAK_STATUS_NO_ARUCO = 0
 THINGSPEAK_STATUS_ERROR = 2
+THINGSPEAK_STATUS_RECOGNITION_ERROR = 3
 
 
 # ============================================================
