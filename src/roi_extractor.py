@@ -10,7 +10,7 @@ import numpy as np
 import logging
 import config
 
-# Resolve ArUco module once at import time (not every call)
+# Resolve ArUco module once at import time
 _aruco = getattr(cv2, 'aruco', None)
 if _aruco is None:
     try:
@@ -23,70 +23,38 @@ if _aruco is None:
 
 
 def _preprocess_for_aruco(gray):
-    """
-    Apply CLAHE + unsharp mask to a grayscale image to enhance ArUco marker edges on blurry images.
-    Returns the enhanced grayscale image. Used only for detection — the ROI crop uses the original image.
-    """
-    # CLAHE enhances local contrast so marker borders become detectable even when image is dim
+    """CLAHE + unsharp mask for better marker detection."""
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
-
-    # Unsharp mask: emphasise edges by subtracting a blurred version
     blurred = cv2.GaussianBlur(enhanced, (0, 0), sigmaX=2.0)
     sharpened = cv2.addWeighted(enhanced, 1.6, blurred, -0.6, 0)
-
     return sharpened
 
 
 def extract_roi(image, cached_pts=None):
-    """
-    Extract ROI from image using ArUco markers or cached coordinates.
-
-    Looks for 4 ArUco markers (IDs 0-3) defining the meter display corners.
-    If all 4 are found, extracts and perspective-corrects the region.
-    If markers are not found, falls back to `cached_pts` if provided.
-
-    Args:
-        image: Input image (numpy array in BGR format)
-        cached_pts: Optional np.float32 array containing cached (TL, TR, BR, BL) source points.
-
-    Returns:
-        tuple (roi: numpy.ndarray, source_pts: numpy.ndarray, is_cached: bool)
-        Returns (None, None, False) if markers not found and no valid cache provided.
-
-    Marker Layout:
-        ID 1 (TL) -------- ID 3 (TR)
-           |                  |
-           |   METER DISPLAY  |
-           |                  |
-        ID 2 (BL) -------- ID 0 (BR)
-    """
+    """Extract ROI using ArUco markers or cached coordinates."""
     if image is None or image.size == 0:
         logging.error("Invalid input image for ROI extraction")
         return None, None, False
 
     if _aruco is None:
-        logging.error("ArUco module unavailable — cannot extract ROI")
+        logging.error("ArUco module unavailable")
         return None, None, False
 
     try:
-        # Convert to grayscale for marker detection
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         gray_enhanced = _preprocess_for_aruco(gray)
 
-        # 5 detection profiles: first 2 run on CLAHE-enhanced image, last 3 on raw grayscale
-        # This catches markers on blurry images where raw thresholding fails
         corners, ids = None, None
         aruco_dict = _aruco.Dictionary_get(_aruco.DICT_4X4_50)
 
         detection_images = [gray_enhanced, gray_enhanced, gray, gray, gray]
         profiles = [
-            # (adaptThreshMin, adaptThreshMax, adaptStep, minPerim, adaptConst, polyApprox)
-            (3, 23, 10, 0.03, 7,   0.05),   # Profile 1: enhanced + relaxed
-            (3, 53, 10, 0.02, 7,   0.05),   # Profile 2: enhanced + very relaxed window
-            (3, 23, 10, 0.03, 7,   0.05),   # Profile 3: raw + relaxed
-            (5, 53,  4, 0.02, 10,  0.08),   # Profile 4: raw + large adaptive windows
-            (3, 23, 10, 0.01, 5,   0.10),   # Profile 5: raw + minimal size filter
+            (3, 23, 10, 0.03, 7,   0.05),
+            (3, 53, 10, 0.02, 7,   0.05),
+            (3, 23, 10, 0.03, 7,   0.05),
+            (5, 53,  4, 0.02, 10,  0.08),
+            (3, 23, 10, 0.01, 5,   0.10),
         ]
 
         for idx, (det_image, prof) in enumerate(zip(detection_images, profiles), start=1):
@@ -100,84 +68,48 @@ def extract_roi(image, cached_pts=None):
             try:
                 parameters.cornerRefinementMethod = _aruco.CORNER_REFINE_SUBPIX
             except AttributeError:
-                pass  # Not available on all OpenCV builds
+                pass
 
             c, i, _ = _aruco.detectMarkers(det_image, aruco_dict, parameters=parameters)
 
             if i is not None and len(i) >= 4:
                 found_ids = set(i.flatten())
                 if all(req_id in found_ids for req_id in [0, 1, 2, 3]):
-                    src = 'enhanced' if idx <= 2 else 'raw'
-                    logging.info(f"   -> [Step 2.2] ArUco SUCCESS (Profile {idx}, {src})")
                     corners, ids = c, i
                     break
-                else:
-                    logging.info(f"   -> [Step 2.1] Profile {idx}: found {len(i)} markers, missing required IDs")
-            else:
-                detected = len(i) if i is not None else 0
-                logging.info(f"   -> [Step 2.1] Profile {idx}: found {detected}/4 markers")
 
-        # Free grayscale copies immediately
+        # Cleanup
         del gray
         del gray_enhanced
 
-        # If after 5 attempts, we still don't have enough markers, check cache
-        if ids is None or len(ids) < 4:
-            detected = 0 if ids is None else len(ids)
-            logging.warning(f"ArUco detection: found {detected}/4 markers after 5 profiles")
-            
+        is_cached = False
+        pts_source = None
+
+        if ids is not None and len(ids) >= 4:
+            # Use inner corners FACING the meter
+            # IDs: 1=TL, 3=TR, 0=BR, 2=BL
+            INNER_CORNER_IDX = {1: 2, 3: 3, 0: 0, 2: 1}
+            found = {}
+            for corner_arr, mid in zip(corners, ids.flatten()):
+                mid = int(mid)
+                if mid in INNER_CORNER_IDX:
+                    found[mid] = corner_arr[0][INNER_CORNER_IDX[mid]].astype(float).tolist()
+
+            if len(found) == 4:
+                # pts_source order: [TL, TR, BR, BL]
+                pts_source = np.float32([found[1], found[3], found[0], found[2]])
+            else:
+                ids = None # Force cache fallback
+
+        if ids is None or pts_source is None:
             if cached_pts is not None:
-                logging.info("Falling back to cached ROI coordinates.")
+                logging.info("Falling back to cached ROI.")
                 pts_source = cached_pts
                 is_cached = True
             else:
                 return None, None, False
-        else:
-            # 1. Calculate centroid of all detected markers to find the "inner" direction
-            marker_centroids = []
-            for corner_arr in corners:
-                marker_centroids.append(np.mean(corner_arr[0], axis=0))
-            overall_centroid = np.mean(marker_centroids, axis=0)
 
-            # 2. Select the corner of each marker closest to the overall centroid
-            # This is topologically guaranteed to be the inner corner facing the meter display,
-            # regardless of marker rotation or perspective skew.
-            found = {}
-            for corner_arr, mid in zip(corners, ids.flatten()):
-                mid = int(mid)
-                if mid in [0, 1, 2, 3]:
-                    # Find corner closest to overall centroid
-                    dists = [np.linalg.norm(c - overall_centroid) for c in corner_arr[0]]
-                    inner_idx = np.argmin(dists)
-                    found[mid] = corner_arr[0][inner_idx].astype(float).tolist()
-
-            # Verify all 4 required markers exist
-            required = [0, 1, 2, 3]
-            if not all(m in found for m in required):
-                missing = [m for m in required if m not in found]
-                logging.warning(f"Missing ArUco markers: {missing}")
-
-                if cached_pts is not None:
-                    logging.info("Falling back to cached ROI coordinates.")
-                    pts_source = cached_pts
-                    is_cached = True
-                else:
-                    return None, None, False
-            else:
-                # Map: TL=1, TR=3, BR=0, BL=2 (inner corners)
-                pts_source = np.float32([
-                    found[1],  # Top-left inner corner
-                    found[3],  # Top-right inner corner
-                    found[0],  # Bottom-right inner corner
-                    found[2],  # Bottom-left inner corner
-                ])
-                is_cached = False
-
-        # Map: TL=1, TR=3, BR=0, BL=2
-        # pts_source is [TL, TR, BR, BL]
-        
-        # Calculate dimensions for the corrected output
-        # Use average of top/bottom and left/right to stabilize the aspect ratio
+        # Perspective Warp
         w_top = np.linalg.norm(pts_source[1] - pts_source[0])
         w_bot = np.linalg.norm(pts_source[2] - pts_source[3])
         roi_w = int((w_top + w_bot) / 2)
@@ -186,47 +118,42 @@ def extract_roi(image, cached_pts=None):
         h_left  = np.linalg.norm(pts_source[3] - pts_source[0])
         roi_h = int((h_right + h_left) / 2)
 
-        # Non-uniform Padding (positive expands, negative shrinks)
-        pad_top = int(roi_h * (config.ROI_PADDING.get("top", 0) / 100.0))
-        pad_bottom = int(roi_h * (config.ROI_PADDING.get("bottom", 0) / 100.0))
-        pad_left = int(roi_w * (config.ROI_PADDING.get("left", 0) / 100.0))
-        pad_right = int(roi_w * (config.ROI_PADDING.get("right", 0) / 100.0))
-
-        # Destination points with padding applied independently
-        # pts_dst maps to: [TL, TR, BR, BL]
         pts_dst = np.float32([
-            [-pad_left, -pad_top],                       # Top-left
-            [roi_w + pad_right, -pad_top],               # Top-right
-            [roi_w + pad_right, roi_h + pad_bottom],     # Bottom-right
-            [-pad_left, roi_h + pad_bottom],             # Bottom-left
+            [0, 0], [roi_w, 0], [roi_w, roi_h], [0, roi_h]
         ])
 
-        # Perspective transform (output size based on padding adjustments)
-        out_w = roi_w + pad_left + pad_right
-        out_h = roi_h + pad_top + pad_bottom
-        matrix = cv2.getPerspectiveTransform(pts_source, pts_dst)
-        roi = cv2.warpPerspective(image, matrix, (out_w, out_h))
+        # Apply Padding from config
+        pad = config.ROI_PADDING
+        pt_top, pt_bot = pad.get("top", 0), pad.get("bottom", 0)
+        pt_left, pt_right = pad.get("left", 0), pad.get("right", 0)
 
-        # --- Post-Crop Exact Pixel Trimming ---
+        # Non-uniform expand/shrink
+        p_t = int(roi_h * (pt_top / 100.0))
+        p_b = int(roi_h * (pt_bot / 100.0))
+        p_l = int(roi_w * (pt_left / 100.0))
+        p_r = int(roi_w * (pt_right / 100.0))
+
+        pts_dst_padded = np.float32([
+            [-p_l, -p_t], [roi_w + p_r, -p_t],
+            [roi_w + p_r, roi_h + p_b], [-p_l, roi_h + p_b]
+        ])
+
+        final_w = roi_w + p_l + p_r
+        final_h = roi_h + p_t + p_b
+
+        matrix = cv2.getPerspectiveTransform(pts_source, pts_dst_padded)
+        roi = cv2.warpPerspective(image, matrix, (final_w, final_h))
+
+        # Trimming
         trim = config.POST_CROP_TRIM_PX
-        t_top, t_bot, t_left, t_right = trim.get("top", 0), trim.get("bottom", 0), trim.get("left", 0), trim.get("right", 0)
-        
-        # Verifytrim amounts won't completely collapse the image
-        if t_top + t_bot < out_h and t_left + t_right < out_w:
-            y1 = t_top
-            y2 = out_h - t_bot if t_bot > 0 else out_h
-            x1 = t_left
-            x2 = out_w - t_right if t_right > 0 else out_w
-            
-            roi = roi[y1:y2, x1:x2]
-            out_w = roi.shape[1]
-            out_h = roi.shape[0]
-        else:
-            logging.warning(f"POST_CROP_TRIM_PX ({t_top},{t_bot},{t_left},{t_right}) exceeds image dims ({out_w}x{out_h}). Skipping trim.")
+        t_t, t_b = trim.get("top", 0), trim.get("bottom", 0)
+        t_l, t_r = trim.get("left", 0), trim.get("right", 0)
 
-        logging.debug(f"ROI extracted: {out_w}x{out_h} px from {'cached' if is_cached else 'fresh'} markers")
+        if t_t + t_b < final_h and t_l + t_r < final_w:
+            roi = roi[t_t:final_h-t_b, t_l:final_w-t_r]
+
         return roi, pts_source, is_cached
 
     except Exception as e:
-        logging.error(f"ROI extraction failed: {e}")
+        logging.error(f"ROI error: {e}")
         return None, None, False

@@ -265,7 +265,6 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
 
     # Desync Protection
     if best_dist >= pad - 1 and pad > 3:
-        import logging
         logging.warning(f"⚠️  Hamming anchor totally desynced (dist={best_dist}/{pad}). Forcing resync to {raw_int}")
         return raw_int
 

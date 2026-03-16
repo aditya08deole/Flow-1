@@ -528,21 +528,24 @@ class ImageCaptureService:
                             else 1.0
                         )
 
-                        # SpikeGuard Logic: Retry up to 3 times if reading is unplausible
+                        # SpikeGuard Logic: Retry recognition if jump is unplausible
+                        is_spike = False
                         for retry_idx in range(1, config.MAX_RECOGNITION_RETRIES + 1):
                             corrected_int = apply_hamming_correction(raw_str, prev_int, t_diff)
                             meter_value = corrected_int / float(10 ** self.calibrated_decimals)
 
-                            # Check for unusual spikes (> 500L in 5 mins)
+                            # Check for unusual spikes (> 500 units in 5 mins)
                             is_spike = False
                             if prev_val is not None:
                                 delta = abs(meter_value - prev_val)
-                                # Handle rollover (9999->0) - only spike if delta is huge and not a near-rollover
-                                # For instance, if delta > 90% of MAX_METER_POWER, it's likely a rollover, not a spike
                                 if delta > config.MAX_PLAUSIBLE_FLOW_DELTA:
-                                    # Very loose rollover check
-                                    if delta < (config.METER_READING_MAX_POWER / (10 ** self.calibrated_decimals)) * 0.9:
-                                        is_spike = True
+                                    is_spike = True
+                                    
+                                    # Fallback: Is it just a rollover (e.g. 99M -> 0)?
+                                    max_cap = config.METER_READING_MAX_POWER / (10 ** self.calibrated_decimals)
+                                    if meter_value < prev_val and (prev_val > max_cap * 0.95 and meter_value < max_cap * 0.05):
+                                        logging.info(f"🔄 SpikeGuard: Plausible mechanical rollover detected ({prev_val} -> {meter_value})")
+                                        is_spike = False
 
                             if not is_spike:
                                 if retry_idx > 1:
@@ -550,20 +553,17 @@ class ImageCaptureService:
                                 break
                             
                             logging.warning(
-                                f"⚠️ SpikeGuard Detection (#{retry_idx}): Unusual trend ({meter_value} from {prev_val}). "
-                                f"Delta={abs(meter_value-prev_val):.2f} exceeds {config.MAX_PLAUSIBLE_FLOW_DELTA}. "
-                                f"Retrying recognition..."
+                                f"⚠️  SpikeGuard Detection (#{retry_idx}): Unusual trend ({meter_value} from {prev_val}). "
+                                f"Delta={delta:.2f} exceeds {config.MAX_PLAUSIBLE_FLOW_DELTA}. Retrying..."
                             )
-                            # Re-run recognition (maybe different contours picked or noise varies)
+                            # Re-run recognition (noise/contours vary)
                             raw_str = recognize_digits(upload_image, self._rf_model)
                             if not raw_str:
                                 break
 
                         if is_spike:
-                            logging.error(f"❌ SpikeGuard: DISCARDING reading after {config.MAX_RECOGNITION_RETRIES} attempts. Value {meter_value} is unplausible.")
+                            logging.error(f"❌ SpikeGuard: DISCARDING reading. Value {meter_value} is unplausible.")
                             meter_value = None
-                            flow_rate = None
-                            # We'll use status 3 later
                         else:
                             if not self._first_reading and prev_val is not None:
                                 flow_rate = calculate_flow_rate(meter_value, prev_val, t_diff)
@@ -571,17 +571,16 @@ class ImageCaptureService:
                             self._stored_values.append(meter_value)
                             self._stored_timestamps.append(now)
                             self._first_reading = False
-                        
-                        # Persist state to disk for crash resilience
-                        try:
-                            # Format with exact calibrated precision - NO ROUNDING
-                            val_str = f"{meter_value:.{self.calibrated_decimals}f}"
-                            with open("Variable.txt", "w") as f:
-                                f.write(val_str)
-                            with open("var2.txt", "w") as f:
-                                f.write(val_str)
-                        except Exception as e:
-                            logging.warning(f"⚠️  Could not write state to Variable.txt/var2.txt: {e}")
+                            
+                            # Persist state
+                            try:
+                                val_str = f"{meter_value:.{self.calibrated_decimals}f}"
+                                with open("Variable.txt", "w") as f:
+                                    f.write(val_str)
+                                with open("var2.txt", "w") as f:
+                                    f.write(val_str)
+                            except Exception as e:
+                                logging.warning(f"⚠️  Could not write state: {e}")
 
                         logging.info(
                             f"[Step 3.5] Meter={meter_value}  "
