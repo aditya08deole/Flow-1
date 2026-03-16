@@ -165,9 +165,12 @@ def recognize_digits(roi_image, model):
         return None
 
     contours = get_sorted_contours(roi_image)
-    if not contours or len(contours) < 4:
-        logging.warning(f"[Step 3] Recognition rejected: Only found {len(contours) if contours else 0} digit contours (expected 8). Noise/Shadow detected.")
+    if not contours:
+        logging.warning("[Step 3] Recognition rejected: No digit contours found.")
         return None
+    
+    if len(contours) < 8:
+        logging.info(f"[Step 3] Found {len(contours)} digits (Meter has 8). Proceeding with partial recognition.")
 
     e3  = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     e11 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
@@ -232,10 +235,21 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
     if prev_int is None:
         return int(raw_str)
 
+    # pad is the length of digits we expect based on previous valid readings
+    str_prev = str(prev_int)
+    pad = len(str_prev)
+    raw_len = len(raw_str)
+
+    # If raw_str is shorter than history, assume it represents the rightmost digits
+    # (e.g., shadows covering leading digits at night).
+    if raw_len < pad:
+        prefix = str_prev[:pad - raw_len]
+        raw_str = prefix + raw_str
+        logging.info(f"🧩 Partial recognition: Padded {pad - raw_len} leading digits from history -> {raw_str}")
+
     raw_int = int(raw_str)
     max_advance = max(1, int(time_diff_min))
     best, best_dist = raw_int, float('inf')
-    pad = len(raw_str)
 
     for k in range(prev_int, prev_int + max_advance + 1):
         # Handle mechanical rollover (e.g. 9999 -> 0000)
@@ -249,9 +263,7 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
             best_dist = dist
             best = k_mod
 
-    # Desync Protection: If the anchor in Variable.txt is completely wrong
-    # (e.g., 0 while the meter is 46,000,000), every digit will mismatch.
-    # In this case, we MUST break the anchor and trust the current AI reading.
+    # Desync Protection
     if best_dist >= pad - 1 and pad > 3:
         import logging
         logging.warning(f"⚠️  Hamming anchor totally desynced (dist={best_dist}/{pad}). Forcing resync to {raw_int}")
