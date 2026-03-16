@@ -534,11 +534,13 @@ class ImageCaptureService:
                             corrected_int = apply_hamming_correction(raw_str, prev_int, t_diff)
                             meter_value = corrected_int / float(10 ** self.calibrated_decimals)
 
-                            # Check for unusual spikes (> 500 units in 5 mins)
+                            # Check for unusual spikes (Rise > 500 or Fall > 200)
                             is_spike = False
                             if prev_val is not None:
-                                delta = abs(meter_value - prev_val)
-                                if delta > config.MAX_PLAUSIBLE_FLOW_DELTA:
+                                diff = meter_value - prev_val
+                                if diff > config.MAX_PLAUSIBLE_FLOW_DELTA:
+                                    is_spike = True
+                                elif diff < -config.MAX_PLAUSIBLE_FALL_DELTA:
                                     is_spike = True
                                     
                                     # Fallback: Is it just a rollover (e.g. 99M -> 0)?
