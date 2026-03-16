@@ -92,9 +92,9 @@ class ThingSpeakReporter:
         if field3_value is not None:
             payload['field3'] = field3_value
         if meter_value is not None:
-            payload['field4'] = round(float(meter_value), 1)
+            payload['field4'] = float(meter_value)
         if flow_rate is not None:
-            payload['field5'] = round(float(flow_rate), 3)
+            payload['field5'] = float(flow_rate)
         if created_at is not None:
             payload['created_at'] = created_at
         
@@ -115,9 +115,9 @@ class ThingSpeakReporter:
                     if entry_id != "0":
                         extra = ""
                         if meter_value is not None:
-                            extra += f", meter={meter_value:.1f}"
+                            extra += f", meter={meter_value}"
                         if flow_rate is not None:
-                            extra += f", flow={flow_rate:.3f}"
+                            extra += f", flow={flow_rate}"
                         logger.info(
                             f"ThingSpeak: status={status_code}{extra} sent "
                             f"(entry #{entry_id}, channel {self.channel_id})"

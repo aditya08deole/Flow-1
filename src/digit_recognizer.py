@@ -106,10 +106,6 @@ def get_sorted_contours(image, min_area=1500):
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
-    # Enhance local contrast so the black digits stand out more clearly against the wheel
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    gray = clahe.apply(gray)
-    
     gray = cv2.medianBlur(gray, 15)
 
     thresh = cv2.adaptiveThreshold(
@@ -128,29 +124,11 @@ def get_sorted_contours(image, min_area=1500):
     if not contours:
         return []
 
-    actual_min_area = getattr(config, 'MIN_CONTOUR_AREA', min_area)
+    actual_min_area = getattr(config, 'MIN_CONTOUR_AREA', 1200)
 
-    # 1. Filter out contours that don't geometrically resemble a digit
-    valid_boxes = []
-    for c in contours:
-        if cv2.contourArea(c) < actual_min_area:
-            continue
-        
-        x, y, w, h = cv2.boundingRect(c)
-        aspect_ratio = w / float(h)
-        
-        # Digits are taller than they are wide.
-        # Prevent picking up dial seams (too thin) or merged artifacts (too wide)
-        if 0.15 <= aspect_ratio <= 1.0:
-            valid_boxes.append((c, x, y, w, h))
-
-    if not valid_boxes:
-        return []
-
-    # 2. Enforce height similarity (digits in a meter are exactly the same physical height)
-    # Reject short background noise or tall vertical glare lines
-    median_h = np.median([b[4] for b in valid_boxes])
-    valid_contours = [b[0] for b in valid_boxes if 0.70 * median_h <= b[4] <= 1.30 * median_h]
+    # Legacy Logic: Simple area filter only. 
+    # Do not filter by height or aspect ratio as night shadows vary these too much.
+    valid_contours = [c for c in contours if cv2.contourArea(c) >= actual_min_area]
 
     if not valid_contours:
         return []
@@ -200,27 +178,9 @@ def recognize_digits(roi_image, model):
         digit_crop = roi_image[y:y + h, x:x + w]
         gray = cv2.cvtColor(digit_crop, cv2.COLOR_BGR2GRAY)
         
-        # Pad to exactly 1:2 aspect ratio (width:height) before scaling to 45x90.
-        # This prevents "fat" 0s or "thin" 1s from distorting during the resize step,
-        # which fundamentally changes the HOG features. Background is white (255).
-        target_ratio = 45.0 / 90.0
-        current_ratio = w / float(h) if h > 0 else target_ratio
-        
-        if current_ratio > target_ratio:
-            # Too wide: need to increase height (pad top/bottom)
-            target_h = int(w / target_ratio)
-            pad_h = target_h - h
-            top = pad_h // 2
-            bottom = pad_h - top
-            gray = cv2.copyMakeBorder(gray, top, bottom, 0, 0, cv2.BORDER_CONSTANT, value=255)
-        elif current_ratio < target_ratio:
-            # Too tall: need to increase width (pad left/right)
-            target_w = int(h * target_ratio)
-            pad_w = target_w - w
-            left = pad_w // 2
-            right = pad_w - left
-            gray = cv2.copyMakeBorder(gray, 0, 0, left, right, cv2.BORDER_CONSTANT, value=255)
-
+        # Legacy Matching: Direct resize (squish).
+        # The AI model was trained on distorted/squished images in codetest.py.
+        # Do not use padding as it changes the HOG features from the training set.
         gray = sk_resize(gray, (90, 45))  # skimage resize, returns float64 [0,1]
 
         # Morphological cleanup — fill gaps, remove speckles, thin strokes
@@ -316,4 +276,4 @@ def calculate_flow_rate(current_val, prev_val, time_diff_min):
     """
     if time_diff_min <= 0 or prev_val is None or current_val is None:
         return 0.0
-    return round((current_val - prev_val) / time_diff_min, 5)
+    return (current_val - prev_val) / time_diff_min

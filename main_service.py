@@ -182,8 +182,16 @@ class ImageCaptureService:
         self._first_reading = True  # Skip Hamming correction and flow rate on first cycle
         
         # State-Lead Decimal Calibration: 
-        # Detect exactly how many numbers are after the decimal in Variable.txt
+        # Read decimal.txt as the absolute master. Fallback to Variable.txt logic then config.
         self.calibrated_decimals = config.DECIMAL_DIGITS 
+        try:
+            dec_path = Path("decimal.txt")
+            if dec_path.exists():
+                with open(dec_path, "r") as f:
+                    self.calibrated_decimals = int(f.read().strip())
+                    logging.info(f"📏 MASTER CALIBRATION loaded from decimal.txt: {self.calibrated_decimals} decimals")
+        except Exception as e:
+            logging.warning(f"⚠️  Could not read decimal.txt: {e}")
 
         
         # Restore state from legacy Variable.txt if it exists
@@ -193,17 +201,18 @@ class ImageCaptureService:
                 with open(var_path, "r") as f:
                     content = f.read().strip()
                 if content:
-                    # Detect decimal count (e.g. "12.34" -> 2)
-                    if "." in content:
-                        self.calibrated_decimals = len(content.split(".")[1])
-                    else:
-                        self.calibrated_decimals = 0
+                    # If decimal.txt wasn't found, try to infer from Variable.txt as fallback
+                    if not Path("decimal.txt").exists():
+                        if "." in content:
+                            self.calibrated_decimals = len(content.split(".")[1])
+                        else:
+                            self.calibrated_decimals = 0
                     
                     legacy_val = float(content)
                     self._stored_values.append(legacy_val)
                     self._stored_timestamps.append(datetime.now())
                     self._first_reading = False
-                    logging.info(f"💾 Restored state from Variable.txt: {legacy_val:.{self.calibrated_decimals}f} (Calibration: {self.calibrated_decimals} decimals)")
+                    logging.info(f"💾 Restored state from Variable.txt: {legacy_val} (Using {self.calibrated_decimals} decimals)")
         except Exception as e:
             logging.warning(f"⚠️  Could not read Variable.txt state: {e}")
 
@@ -529,7 +538,7 @@ class ImageCaptureService:
                         
                         # Persist state to disk for crash resilience
                         try:
-                            # Format with exact calibrated precision
+                            # Format with exact calibrated precision - NO ROUNDING
                             val_str = f"{meter_value:.{self.calibrated_decimals}f}"
                             with open("Variable.txt", "w") as f:
                                 f.write(val_str)
@@ -539,7 +548,7 @@ class ImageCaptureService:
                             logging.warning(f"⚠️  Could not write state to Variable.txt/var2.txt: {e}")
 
                         logging.info(
-                            f"[Step 3.5] Meter={meter_value:.{self.calibrated_decimals}f}  "
+                            f"[Step 3.5] Meter={meter_value}  "
                             f"Flow={flow_rate if flow_rate is not None else 'n/a'} units/min"
                         )
                     else:

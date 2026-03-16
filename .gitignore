@@ -22,6 +22,7 @@ build/
 Variable.txt
 var2.txt
 config_WM.py
+decimal.txt
 
 # Runtime state
 meter_state.json
