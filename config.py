@@ -100,6 +100,7 @@ DECIMAL_DIGITS = 1            # Rightmost N digits are decimal places (e.g. 0123
 METER_READING_MAX_POWER = 100000000     # 99,999,999.99 for 8-digit meter
 MAX_PLAUSIBLE_FLOW_DELTA = 500.0        # Max units (e.g. Liters) possible in 5 minutes
 MAX_RECOGNITION_RETRIES = 3             # Number of times to retry if a spike is detected
+STORED_READINGS_MAX = 5                 # Rolling window size for flow rate calculation
 
 
 # ============================================================
