@@ -115,7 +115,7 @@ def get_sorted_contours(image, min_area=1500):
         33, 5
     )
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    kernel = np.ones((3, 3), np.uint8)
     thresh = cv2.dilate(thresh, kernel, iterations=5)
     thresh = cv2.erode(thresh, kernel, iterations=2)
 
