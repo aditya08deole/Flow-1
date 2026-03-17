@@ -186,9 +186,11 @@ def recognize_digits(roi_image, model):
         # Do not use padding as it changes the HOG features from the training set.
         gray = sk_resize(gray, (90, 45))  # skimage resize, returns float64 [0,1]
 
-        # Morphological cleanup — fill gaps, remove speckles, thin strokes
-        # gray is float64 [0,1] from sk_resize — pass directly to cv2 (matches training pipeline).
-        # Training (Ph-03-master/codetest.py) ran morphology on float64 without any uint8 conversion.
+        e3  = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        e11 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+        
+        # Morphological cleanup — bit-perfect match with Ph-03-master/codetest.py
+        # Training ran morphology on Float64 [0,1] from resize()
         gray = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, e3)
         gray = cv2.morphologyEx(gray, cv2.MORPH_OPEN, e11)
         gray = cv2.erode(gray, e3, iterations=3)
@@ -261,10 +263,11 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
             best_dist = dist
             best = k_mod
 
-    # Desync Protection: If the best match still differs significantly, force a resync.
-    # Changed from pad > 3 to pad > 1 to allow recovery for small readings (e.g. 3.3 -> 33).
-    if best_dist >= pad - 1 and pad > 1:
-        logging.warning(f"⚠️  Hamming anchor totally desynced (dist={best_dist}/{pad}). Forcing resync to {raw_int}")
+    # Desync Protection: If the best match still differs by more than 1 digit, 
+    # force a resync to the raw detection. This allows the system to escape
+    # the "Hamming Ratchet" (stuck at high reading like 3.7 when it should be 3.3).
+    if best_dist >= 1 and pad > 1:
+        logging.warning(f"⚠️  Hamming anchor desynced (dist={best_dist}/{pad}). Escaping ratchet, reset to raw: {raw_int}")
         return raw_int
 
     return best
