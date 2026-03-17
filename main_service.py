@@ -229,7 +229,7 @@ class ImageCaptureService:
         self._last_aruco_seen = None
         self._aruco_fail_streak = 0
         self._last_roi_pts = None
-        self.ARUCO_CACHE_MINUTES = 30
+        self.ARUCO_CACHE_MINUTES = 5
 
         logging.info(f"✓ Capture interval: {config.CAPTURE_INTERVAL_MINUTES} minutes")
         logging.info(f"✓ Camera resolution: {config.CAMERA_RESOLUTION[0]}x{config.CAMERA_RESOLUTION[1]}")
@@ -556,7 +556,7 @@ class ImageCaptureService:
                             
                             logging.warning(
                                 f"⚠️  SpikeGuard Detection (#{retry_idx}): Unusual trend ({meter_value} from {prev_val}). "
-                                f"Delta={delta:.2f} exceeds {config.MAX_PLAUSIBLE_FLOW_DELTA}. Retrying..."
+                                f"Delta={diff:.2f} exceeds {config.MAX_PLAUSIBLE_FLOW_DELTA}. Retrying..."
                             )
                             # Re-run recognition (noise/contours vary)
                             raw_str = recognize_digits(upload_image, self._rf_model)

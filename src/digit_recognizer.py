@@ -187,16 +187,14 @@ def recognize_digits(roi_image, model):
         gray = sk_resize(gray, (90, 45))  # skimage resize, returns float64 [0,1]
 
         # Morphological cleanup — fill gaps, remove speckles, thin strokes
-        gray_u8 = (gray * 255).astype(np.uint8)
-        gray_u8 = cv2.morphologyEx(gray_u8, cv2.MORPH_CLOSE, e3)
-        gray_u8 = cv2.morphologyEx(gray_u8, cv2.MORPH_OPEN, e11)
-        gray_u8 = cv2.erode(gray_u8, e3, iterations=3)
-
-        # Back to float for skimage HOG
-        gray_f = gray_u8.astype(np.float64) / 255.0
+        # gray is float64 [0,1] from sk_resize — pass directly to cv2 (matches training pipeline).
+        # Training (Ph-03-master/codetest.py) ran morphology on float64 without any uint8 conversion.
+        gray = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, e3)
+        gray = cv2.morphologyEx(gray, cv2.MORPH_OPEN, e11)
+        gray = cv2.erode(gray, e3, iterations=3)
 
         features = hog(
-            gray_f,
+            gray,
             orientations=9,
             pixels_per_cell=(8, 8),
             cells_per_block=(2, 2)
@@ -264,7 +262,7 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
             best = k_mod
 
     # Desync Protection
-    if best_dist >= pad - 1 and pad > 3:
+    if best_dist >= pad - 1 and pad > 1:
         logging.warning(f"⚠️  Hamming anchor totally desynced (dist={best_dist}/{pad}). Forcing resync to {raw_int}")
         return raw_int
 

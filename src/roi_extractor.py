@@ -152,6 +152,11 @@ def extract_roi(image, cached_pts=None):
         if t_t + t_b < final_h and t_l + t_r < final_w:
             roi = roi[t_t:final_h-t_b, t_l:final_w-t_r]
 
+        # Normalize to fixed canonical size — the RF model was trained on 540×215 px ROI.
+        # ArUco warp produces variable dimensions each frame; this resize makes every
+        # ROI identical in size so digit contours and HOG features match training exactly.
+        roi = cv2.resize(roi, (540, 215), interpolation=cv2.INTER_LINEAR)
+
         return roi, pts_source, is_cached
 
     except Exception as e:

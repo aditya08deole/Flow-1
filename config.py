@@ -90,7 +90,7 @@ BLUR_THRESHOLD = 10.0
 # HOG feature extraction — must match what rf_rasp_classifier.sav was trained on
 DIGIT_RESIZE_H = 90           # Resize height per digit crop (pixels)
 DIGIT_RESIZE_W = 45           # Resize width per digit crop (pixels)
-MIN_CONTOUR_AREA = 300        # Minimum contour pixel area to be classified as a digit
+MIN_CONTOUR_AREA = 1500       # Minimum contour pixel area to be classified as a digit (matches training: Ph-03-master used 1500)
 
 # Random Forest model (loaded once at service start, not per-cycle)
 MODEL_PATH = "rf_rasp_classifier.sav"
