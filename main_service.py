@@ -181,18 +181,7 @@ class ImageCaptureService:
                                         maxlen=config.STORED_READINGS_MAX)
         self._first_reading = True  # Skip Hamming correction and flow rate on first cycle
         
-        # State-Lead Decimal Calibration: 
-        # Read decimal.txt as the absolute master. Fallback to Variable.txt logic then config.
         self.calibrated_decimals = config.DECIMAL_DIGITS 
-        try:
-            dec_path = Path("decimal.txt")
-            if dec_path.exists():
-                with open(dec_path, "r") as f:
-                    self.calibrated_decimals = int(f.read().strip())
-                    logging.info(f"📏 MASTER CALIBRATION loaded from decimal.txt: {self.calibrated_decimals} decimals")
-        except Exception as e:
-            logging.warning(f"⚠️  Could not read decimal.txt: {e}")
-
         
         # Restore state from legacy Variable.txt if it exists
         try:
@@ -201,18 +190,11 @@ class ImageCaptureService:
                 with open(var_path, "r") as f:
                     content = f.read().strip()
                 if content:
-                    # If decimal.txt wasn't found, try to infer from Variable.txt as fallback
-                    if not Path("decimal.txt").exists():
-                        if "." in content:
-                            self.calibrated_decimals = len(content.split(".")[1])
-                        else:
-                            self.calibrated_decimals = 0
-                    
                     legacy_val = float(content)
                     self._stored_values.append(legacy_val)
                     self._stored_timestamps.append(datetime.now())
                     self._first_reading = False
-                    logging.info(f"💾 Restored state from Variable.txt: {legacy_val} (Using {self.calibrated_decimals} decimals)")
+                    logging.info(f"💾 Restored state from Variable.txt: {legacy_val}")
         except Exception as e:
             logging.warning(f"⚠️  Could not read Variable.txt state: {e}")
 
