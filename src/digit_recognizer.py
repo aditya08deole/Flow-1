@@ -261,7 +261,8 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
             best_dist = dist
             best = k_mod
 
-    # Desync Protection
+    # Desync Protection: If the best match still differs significantly, force a resync.
+    # Changed from pad > 3 to pad > 1 to allow recovery for small readings (e.g. 3.3 -> 33).
     if best_dist >= pad - 1 and pad > 1:
         logging.warning(f"⚠️  Hamming anchor totally desynced (dist={best_dist}/{pad}). Forcing resync to {raw_int}")
         return raw_int
