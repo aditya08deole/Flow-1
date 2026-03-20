@@ -153,8 +153,9 @@ def recognize_digits(roi_image, model):
         return None
 
     # Internal Chop Rule: Only process the first 7 digits (stable range).
-    # The saved JPG in capture_output/ remains the full 8-digit ROI.
-    roi_image = roi_image[:, :540]
+    # We use a proportional crop (~83% of width) to accommodate natural ROI sizes.
+    w = roi_image.shape[1]
+    roi_image = roi_image[:, :int(w * 0.8307)]
 
     contours = get_sorted_contours(roi_image)
     if not contours:

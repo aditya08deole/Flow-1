@@ -149,11 +149,8 @@ def extract_roi(image, cached_pts=None):
         if t_t + t_b < final_h and t_l + t_r < final_w:
             roi = roi[t_t:final_h-t_b, t_l:final_w-t_r]
 
-        # Normalize to fixed canonical size — Phase-1/Ph-03-master/codetest.py used a 650x215 warp
-        # then chopped the rightmost 110px (CROP_COORD=540) to ignore the unstable liter drum.
-        # This prevents digit "squishing" and removes noise that causes 3.3 -> 3.7 drift.
-        roi = cv2.resize(roi, (650, 215), interpolation=cv2.INTER_LINEAR)
-
+        # Return the warped ROI using its natural aspect ratio as detected by ArUco markers.
+        # This prevents stretching/distortion. The digit recognizer will handle individual digit resizing.
         return roi, pts_source, is_cached
 
     except Exception as e:
