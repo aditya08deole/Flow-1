@@ -241,28 +241,28 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
 
     # pad is the length of digits we expect based on previous valid readings
     str_prev = str(prev_int)
-    pad = len(str_prev)
-    raw_len = len(raw_str)
-
-    # If raw_str is shorter than history, assume it represents the rightmost digits
-    # (e.g., shadows covering leading digits at night).
-    if raw_len < pad:
-        prefix = str_prev[:pad - raw_len]
-        raw_str = prefix + raw_str
-        logging.info(f"🧩 Partial recognition: Padded {pad - raw_len} leading digits from history -> {raw_str}")
+    # Handle wild length mismatches (e.g. history is 2 digits, OCR sees 7 digits)
+    # This prevents acceptance of massive hallucinations.
+    if raw_len > pad + 1:
+        logging.warning(f"⚠️  Length mismatch: OCR saw {raw_len} digits but history is {pad}. Resetting.")
+        return raw_int
 
     raw_int = int(raw_str)
     max_advance = max(1, int(time_diff_min))
     best, best_dist = raw_int, float('inf')
 
+    # Ensure length parity for comparison
+    raw_str_compare = str(raw_int).zfill(pad)
+    if len(raw_str_compare) > pad:
+        raw_str_compare = raw_str_compare[-pad:] # Compare rightmost digits
+
     for k in range(prev_int, prev_int + max_advance + 1):
         # Handle mechanical rollover (e.g. 9999 -> 0000)
         k_mod = k % (10 ** pad)
+        str_k = str(k_mod).zfill(pad)
         
-        dist = sum(
-            c1 != c2
-            for c1, c2 in zip(str(k_mod).zfill(pad), str(raw_int).zfill(pad))
-        )
+        dist = sum(c1 != c2 for c1, c2 in zip(str_k, raw_str_compare))
+        
         if dist < best_dist:
             best_dist = dist
             best = k_mod
