@@ -1,18 +1,6 @@
 """
 Digit Recognizer — HOG + Random Forest Edge Processing Pipeline
-Repository: https://github.com/aditya08deole/Flow-1.git
-
-Core pipeline ported from Ph-03-master/codetest.py (lines 205–419).
-Runs entirely on-device (no cloud ML dependency).
-
-Pipeline:
-  ROI image
-    → blur check (Laplacian variance)
-    → grayscale → medianBlur → adaptiveThreshold → dilate/erode
-    → findContours → sort left-to-right → area filter
-    → per digit: boundingRect → resize(90×45) → morph → HOG → RF.predict
-    → Hamming distance correction
-    → flow rate calculation
+Compatible with Pi Zero W / ARMv6.
 """
 
 import cv2
@@ -239,13 +227,13 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
     if prev_int is None:
         return int(raw_str)
 
-    # pad is the length of digits we expect based on previous valid readings
     str_prev = str(prev_int)
-    # Handle wild length mismatches (e.g. history is 2 digits, OCR sees 7 digits)
-    # This prevents acceptance of massive hallucinations.
+    pad = len(str_prev)
+    raw_len = len(raw_str)
+
     if raw_len > pad + 1:
         logging.warning(f"⚠️  Length mismatch: OCR saw {raw_len} digits but history is {pad}. Resetting.")
-        return raw_int
+        return int(raw_str)
 
     raw_int = int(raw_str)
     max_advance = max(1, int(time_diff_min))

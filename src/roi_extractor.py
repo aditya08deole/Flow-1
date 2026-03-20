@@ -1,8 +1,5 @@
 """
 ROI Extractor - ArUco Marker-based Region of Interest Extraction
-Extracts meter display region using ArUco markers only (no fallback)
-
-Pinned to OpenCV 4.5.x Legacy ArUco API for ARMv6 compatibility.
 """
 
 import cv2

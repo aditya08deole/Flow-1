@@ -1,19 +1,6 @@
 #!/usr/bin/env python3
 """
-RetroFit Image Capture Service v2.1 — Full Edge Processing System
-Pipeline per cycle:
-  1. Capture image (PiCamera + GPIO LED)
-  2. Extract ROI via ArUco markers
-  3. Save + upload to Google Drive (rclone)
-  4. Edge processing: blur check → contour → HOG → RF digit classify
-  5. Report to ThingSpeak:
-       field1 = ArUco status (1=ROI/0=full/2=error)
-       field2 = file size KB
-       field3 = cycle duration s
-       field4 = detected meter reading (float, e.g. 1234.5)
-       field5 = flow rate (units/min)
-
-Repository: https://github.com/aditya08deole/Flow-1.git
+RetroFit Image Capture Service — Full Edge Processing System
 """
 
 import os
