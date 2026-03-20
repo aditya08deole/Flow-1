@@ -156,7 +156,6 @@ def extract_roi(image, cached_pts=None):
         # then chopped the rightmost 110px (CROP_COORD=540) to ignore the unstable liter drum.
         # This prevents digit "squishing" and removes noise that causes 3.3 -> 3.7 drift.
         roi = cv2.resize(roi, (650, 215), interpolation=cv2.INTER_LINEAR)
-        roi = roi[:, :540] # Apply the "Chop Rule" to target only stable digits
 
         return roi, pts_source, is_cached
 

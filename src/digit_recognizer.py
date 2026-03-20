@@ -164,6 +164,10 @@ def recognize_digits(roi_image, model):
         logging.error("Digit recognition dependencies not available")
         return None
 
+    # Internal Chop Rule: Only process the first 7 digits (stable range).
+    # The saved JPG in capture_output/ remains the full 8-digit ROI.
+    roi_image = roi_image[:, :540]
+
     contours = get_sorted_contours(roi_image)
     if not contours:
         logging.warning("[Step 3] Recognition rejected: No digit contours found.")
@@ -263,10 +267,10 @@ def apply_hamming_correction(raw_str, prev_int, time_diff_min):
             best_dist = dist
             best = k_mod
 
-    # Desync Protection: If the best match still differs by more than 1 digit, 
+    # Desync Protection: If the best match still differs by more than 3 digits, 
     # force a resync to the raw detection. This allows the system to escape
-    # the "Hamming Ratchet" (stuck at high reading like 3.7 when it should be 3.3).
-    if best_dist >= 1 and pad > 1:
+    # long-term drift while ignoring short-term OCR flips.
+    if best_dist >= 4 and pad > 1:
         logging.warning(f"⚠️  Hamming anchor desynced (dist={best_dist}/{pad}). Escaping ratchet, reset to raw: {raw_int}")
         return raw_int
 
